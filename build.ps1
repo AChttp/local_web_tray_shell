@@ -6,10 +6,23 @@ $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $distDir = Join-Path $projectRoot "dist"
 $assetsDir = Join-Path $projectRoot "assets"
 $iconPath = Join-Path $assetsDir "switch.ico"
+$versionFile = Join-Path $projectRoot "VERSION"
+$objDir = Join-Path $projectRoot "obj"
+$generatedAssemblyInfoPath = Join-Path $objDir "GeneratedAssemblyInfo.cs"
 $cscPath = "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe"
 
 if (-not (Test-Path $cscPath)) {
     throw "Missing csc.exe at $cscPath"
+}
+
+if (-not (Test-Path $versionFile)) {
+    throw "Missing version file at $versionFile"
+}
+
+$appVersion = (Get-Content $versionFile -Raw).Trim()
+
+if ([string]::IsNullOrWhiteSpace($appVersion)) {
+    throw "VERSION file is empty"
 }
 
 function New-RoundedRectanglePath {
@@ -236,8 +249,27 @@ $artifacts = Resolve-WebView2Artifacts
 
 New-Item -ItemType Directory -Path $distDir -Force | Out-Null
 Get-ChildItem -Path $distDir -Force | Remove-Item -Force -Recurse
+New-Item -ItemType Directory -Path $objDir -Force | Out-Null
+
+$generatedAssemblyInfo = @"
+using System.Reflection;
+using System.Runtime.InteropServices;
+
+[assembly: AssemblyTitle("Switch")]
+[assembly: AssemblyDescription("Switch local web and command control center")]
+[assembly: AssemblyCompany("AChttp")]
+[assembly: AssemblyProduct("Switch")]
+[assembly: AssemblyCopyright("Copyright (c) 2026")]
+[assembly: ComVisible(false)]
+[assembly: AssemblyVersion("$appVersion.0")]
+[assembly: AssemblyFileVersion("$appVersion.0")]
+[assembly: AssemblyInformationalVersion("v$appVersion")]
+"@
+
+Set-Content -Path $generatedAssemblyInfoPath -Value $generatedAssemblyInfo -Encoding UTF8
 
 $outputExe = Join-Path $distDir "Switch.exe"
+$outputZip = Join-Path $distDir ("Switch-v{0}-win-x64.zip" -f $appVersion)
 $sourceFiles = Get-ChildItem -Path (Join-Path $projectRoot "src") -Recurse -Filter *.cs |
     Sort-Object FullName |
     Select-Object -ExpandProperty FullName
@@ -266,6 +298,7 @@ $compileArgs = @(
 )
 
 $compileArgs += $sourceFiles
+$compileArgs += $generatedAssemblyInfoPath
 
 & $cscPath $compileArgs
 
@@ -273,7 +306,17 @@ if ($LASTEXITCODE -ne 0) {
     throw "Compilation failed with exit code $LASTEXITCODE"
 }
 
+$releaseStageDir = Join-Path $distDir "release-stage"
+New-Item -ItemType Directory -Path $releaseStageDir -Force | Out-Null
+Copy-Item -Path $outputExe -Destination (Join-Path $releaseStageDir "Switch.exe") -Force
+Copy-Item -Path (Join-Path $projectRoot "README.md") -Destination (Join-Path $releaseStageDir "README.md") -Force
+Copy-Item -Path (Join-Path $projectRoot "LICENSE") -Destination (Join-Path $releaseStageDir "LICENSE") -Force
+Compress-Archive -Path (Join-Path $releaseStageDir "*") -DestinationPath $outputZip -Force
+Remove-Item -Path $releaseStageDir -Recurse -Force
+
 Write-Host ""
 Write-Host "Build complete:"
 Write-Host "  EXE  : $outputExe"
+Write-Host "  ZIP  : $outputZip"
 Write-Host "  ICON : $iconPath"
+Write-Host "  VER  : $appVersion"

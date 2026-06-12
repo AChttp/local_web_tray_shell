@@ -4,6 +4,8 @@
 
 ![Switch 界面预览](full_screen_capture.png)
 
+当前首个公开版本：`v1.0.0`
+
 ## 功能
 
 - 多站点网页视图
@@ -67,6 +69,12 @@ dist\Switch.exe
 ```powershell
 .\dist\Switch.exe --self-test
 ```
+
+## 发布
+
+- 版本号由根目录 [VERSION](VERSION) 管理
+- 变更记录见 [CHANGELOG.md](CHANGELOG.md)
+- GitHub Release 可附带 `Switch.exe` 和版本化压缩包
 
 ## 配置文件
 
