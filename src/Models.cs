@@ -131,14 +131,33 @@ namespace LocalWebTrayShell
         }
     }
 
+    internal sealed class CommandLogSnapshot
+    {
+        public string CommandId { get; set; }
+
+        public string[] Lines { get; set; }
+
+        public int FirstSequence { get; set; }
+
+        public int NextSequence { get; set; }
+    }
+
     internal sealed class CommandRuntimeChangedEventArgs : EventArgs
     {
         public CommandRuntimeChangedEventArgs(string commandId)
+            : this(commandId, false)
+        {
+        }
+
+        public CommandRuntimeChangedEventArgs(string commandId, bool logsOnly)
         {
             CommandId = commandId;
+            LogsOnly = logsOnly;
         }
 
         public string CommandId { get; private set; }
+
+        public bool LogsOnly { get; private set; }
     }
 
     internal static class RunModeCatalog

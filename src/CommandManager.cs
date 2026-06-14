@@ -61,7 +61,7 @@ namespace LocalWebTrayShell
                         runtime = new CommandRuntimeState();
                         runtime.Command = pair.Value;
                         runtime.Status = CommandStatus.Stopped;
-                        runtime.Logs = new Queue<string>();
+                        runtime.Logs = new Queue<CommandLogLine>();
                         runtimes[pair.Key] = runtime;
                         continue;
                     }
@@ -104,7 +104,7 @@ namespace LocalWebTrayShell
             }
         }
 
-        public string[] GetLogs(string commandId)
+        public CommandLogSnapshot GetLogSnapshot(string commandId)
         {
             CommandRuntimeState runtime;
 
@@ -112,11 +112,20 @@ namespace LocalWebTrayShell
             {
                 if (!runtimes.TryGetValue(commandId, out runtime) || runtime.Logs == null)
                 {
-                    return new string[0];
+                    return new CommandLogSnapshot
+                    {
+                        CommandId = commandId,
+                        Lines = new string[0]
+                    };
                 }
 
-                return runtime.Logs.ToArray();
+                return CreateLogSnapshotLocked(commandId, runtime);
             }
+        }
+
+        public string[] GetLogs(string commandId)
+        {
+            return GetLogSnapshot(commandId).Lines;
         }
 
         public void ClearLogs(string commandId)
@@ -131,7 +140,7 @@ namespace LocalWebTrayShell
                 runtimes[commandId].Logs.Clear();
             }
 
-            RaiseRuntimeChanged(commandId);
+            RaiseRuntimeChanged(commandId, true);
         }
 
         public int GetRunningCount()
@@ -705,14 +714,14 @@ namespace LocalWebTrayShell
                 AddLogLocked(runtime, message);
             }
 
-            RaiseRuntimeChanged(commandId);
+            RaiseRuntimeChanged(commandId, true);
         }
 
         private void AddLogLocked(CommandRuntimeState runtime, string message)
         {
             if (runtime.Logs == null)
             {
-                runtime.Logs = new Queue<string>();
+                runtime.Logs = new Queue<CommandLogLine>();
             }
 
             while (runtime.Logs.Count >= MaxLogLines)
@@ -720,7 +729,49 @@ namespace LocalWebTrayShell
                 runtime.Logs.Dequeue();
             }
 
-            runtime.Logs.Enqueue("[" + DateTime.Now.ToString("HH:mm:ss") + "] " + message);
+            runtime.Logs.Enqueue(new CommandLogLine(
+                runtime.NextLogSequence,
+                "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + message));
+            runtime.NextLogSequence += 1;
+        }
+
+        private CommandLogSnapshot CreateLogSnapshotLocked(string commandId, CommandRuntimeState runtime)
+        {
+            string[] lines;
+            int index = 0;
+            int firstSequence = runtime.NextLogSequence;
+
+            if (runtime.Logs == null || runtime.Logs.Count == 0)
+            {
+                return new CommandLogSnapshot
+                {
+                    CommandId = commandId,
+                    Lines = new string[0],
+                    FirstSequence = firstSequence,
+                    NextSequence = runtime.NextLogSequence
+                };
+            }
+
+            lines = new string[runtime.Logs.Count];
+
+            foreach (CommandLogLine line in runtime.Logs)
+            {
+                if (index == 0)
+                {
+                    firstSequence = line.Sequence;
+                }
+
+                lines[index] = line.Text;
+                index += 1;
+            }
+
+            return new CommandLogSnapshot
+            {
+                CommandId = commandId,
+                Lines = lines,
+                FirstSequence = firstSequence,
+                NextSequence = runtime.NextLogSequence
+            };
         }
 
         private void CancelRetryLocked(CommandRuntimeState runtime)
@@ -835,11 +886,16 @@ namespace LocalWebTrayShell
 
         private void RaiseRuntimeChanged(string commandId)
         {
+            RaiseRuntimeChanged(commandId, false);
+        }
+
+        private void RaiseRuntimeChanged(string commandId, bool logsOnly)
+        {
             EventHandler<CommandRuntimeChangedEventArgs> handler = RuntimeChanged;
 
             if (handler != null && !disposed)
             {
-                handler(this, new CommandRuntimeChangedEventArgs(commandId));
+                handler(this, new CommandRuntimeChangedEventArgs(commandId, logsOnly));
             }
         }
 
@@ -856,13 +912,28 @@ namespace LocalWebTrayShell
             public int Generation { get; private set; }
         }
 
+        private sealed class CommandLogLine
+        {
+            public CommandLogLine(int sequence, string text)
+            {
+                Sequence = sequence;
+                Text = text;
+            }
+
+            public int Sequence { get; private set; }
+
+            public string Text { get; private set; }
+        }
+
         private sealed class CommandRuntimeState
         {
             public CommandEntry Command { get; set; }
 
             public Process Process { get; set; }
 
-            public Queue<string> Logs { get; set; }
+            public Queue<CommandLogLine> Logs { get; set; }
+
+            public int NextLogSequence { get; set; }
 
             public CommandStatus Status { get; set; }
 

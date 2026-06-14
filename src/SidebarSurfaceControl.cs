@@ -6,6 +6,16 @@ using System.Windows.Forms;
 
 namespace LocalWebTrayShell
 {
+    internal sealed class SidebarListItemEventArgs<T> : EventArgs
+    {
+        public SidebarListItemEventArgs(T item)
+        {
+            Item = item;
+        }
+
+        public T Item { get; private set; }
+    }
+
     internal enum SidebarCommandAction
     {
         Add,
