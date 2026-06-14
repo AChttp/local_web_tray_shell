@@ -11,17 +11,50 @@ namespace LocalWebTrayShell
     internal sealed class ShellForm : Form
     {
         private const string AppName = "Switch";
+        private const int DefaultSidebarWidth = 390;
+        private const int SidebarSplitterWidth = 20;
+        private const int SidebarMinExpandedWidth = 260;
+        private const int SidebarMaxWidth = 560;
+        private const int SidebarCollapseThreshold = 96;
+        private const int SidebarResizeIntervalMs = 16;
+        private const int WM_SYSCOMMAND = 0x0112;
+        private const int SC_CLOSE = 0xF060;
+        private const int WM_NCHITTEST = 0x0084;
+        private const int WM_NCLBUTTONDOWN = 0x00A1;
+        private const int HTCLIENT = 1;
+        private const int HTCAPTION = 2;
+        private const int HTLEFT = 10;
+        private const int HTRIGHT = 11;
+        private const int HTTOP = 12;
+        private const int HTTOPLEFT = 13;
+        private const int HTTOPRIGHT = 14;
+        private const int HTBOTTOM = 15;
+        private const int HTBOTTOMLEFT = 16;
+        private const int HTBOTTOMRIGHT = 17;
+        private const int TitleBarHeight = 44;
+        private const int ResizeGripSize = 8;
+
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
 
         private readonly NotifyIcon notifyIcon;
         private readonly ContextMenuStrip trayMenu;
         private readonly StatusStrip statusStrip;
         private readonly ToolStripStatusLabel statusLabel;
-        private readonly TableLayoutPanel rootPanel;
+        private readonly Panel titleBarPanel;
+        private readonly TitleBarIconButton titleSidebarButton;
+        private readonly Label titleBarLabel;
+        private readonly TitleBarIconButton minimizeButton;
+        private readonly TitleBarIconButton maximizeButton;
+        private readonly TitleBarIconButton closeButton;
+        private readonly Panel rootPanel;
         private readonly Panel leftSidebar;
+        private readonly Panel sidebarContentPanel;
+        private readonly SidebarSplitterPanel sidebarSplitter;
         private readonly Panel brandPanel;
-        private readonly Panel collapsedSidebarPanel;
         private readonly Panel commandSection;
         private readonly Panel siteSection;
         private readonly Panel workspacePanel;
@@ -34,31 +67,38 @@ namespace LocalWebTrayShell
         private readonly Label summaryLabel;
         private readonly Label commandSectionTitle;
         private readonly Label siteSectionTitle;
+        private readonly RoundedLabel commandEmptyLabel;
+        private readonly RoundedLabel siteEmptyLabel;
+        private readonly Label webStateTitleLabel;
+        private readonly Label webStateDetailLabel;
+        private readonly ThemedButton webStateRetryButton;
+        private readonly Panel webStateOverlay;
         private readonly BufferedScrollPanel commandListPanel;
         private readonly BufferedScrollPanel siteListPanel;
         private readonly TableLayoutPanel commandListContent;
         private readonly TableLayoutPanel siteListContent;
-        private readonly Button addCommandButton;
-        private readonly Button editCommandButton;
-        private readonly Button deleteCommandButton;
-        private readonly Button startStopCommandButton;
-        private readonly Button stopAllCommandsButton;
-        private readonly Button addSiteButton;
-        private readonly Button editSiteButton;
-        private readonly Button deleteSiteButton;
-        private readonly Button openSiteButton;
-        private readonly Button webViewModeButton;
-        private readonly Button logsViewModeButton;
-        private readonly Button toggleSidebarButton;
-        private readonly Button expandSidebarRailButton;
+        private readonly ThemedButton addCommandButton;
+        private readonly ThemedButton editCommandButton;
+        private readonly ThemedButton deleteCommandButton;
+        private readonly ThemedButton startStopCommandButton;
+        private readonly ThemedButton stopAllCommandsButton;
+        private readonly ThemedButton addSiteButton;
+        private readonly ThemedButton editSiteButton;
+        private readonly ThemedButton deleteSiteButton;
+        private readonly ThemedButton openSiteButton;
+        private readonly ThemedButton webViewModeButton;
+        private readonly ThemedButton logsViewModeButton;
         private readonly Label currentCommandLabel;
-        private readonly Label commandStatusBadge;
-        private readonly Button reloadSiteButton;
-        private readonly Button clearLogsButton;
-        private readonly Button copyLogsButton;
+        private readonly RoundedLabel commandStatusBadge;
+        private readonly ThemedButton reloadSiteButton;
+        private readonly ThemedButton clearLogsButton;
+        private readonly ThemedButton copyLogsButton;
+        private readonly CheckBox autoScrollLogsCheckBox;
         private readonly TextBox logsTextBox;
         private readonly Panel webViewHost;
         private readonly Timer uiRefreshTimer;
+        private readonly Timer sidebarResizeTimer;
+        private readonly Timer trayRestoreTimer;
         private readonly ToolStripMenuItem trayStartupMenuItem;
         private readonly Dictionary<string, CommandSidebarCard> commandCards;
         private readonly Dictionary<string, SiteSidebarCard> siteCards;
@@ -76,7 +116,19 @@ namespace LocalWebTrayShell
         private bool updatingStartupToggle;
         private bool lastLogAutoScrollEnabled;
         private bool sidebarHidden;
+        private bool resizingSidebar;
+        private bool hidingToTray;
+        private bool parkedInTray;
+        private bool restoringFromTray;
+        private int sidebarDragStartX;
+        private int sidebarDragStartWidth;
+        private int sidebarPendingWidth;
+        private int sidebarFrozenContentWidth;
+        private int sidebarFrozenWorkspaceContentWidth;
+        private DateTime statusSummaryHoldUntilUtc;
         private int expandedSidebarWidth;
+        private Rectangle preTrayBounds;
+        private FormWindowState preTrayWindowState;
 
         public ShellForm()
         {
@@ -94,56 +146,100 @@ namespace LocalWebTrayShell
 
             workspaceMode = WorkspaceMode.Web;
 
-            Text = AppName;
+            SetWindowTitle(AppName);
             Width = 1540;
             Height = 930;
             MinimumSize = new Size(1240, 760);
             StartPosition = FormStartPosition.CenterScreen;
-            AutoScaleMode = AutoScaleMode.None;
+            FormBorderStyle = FormBorderStyle.None;
+            AutoScaleMode = AutoScaleMode.Dpi;
             Icon = appIcon;
-            BackColor = Color.FromArgb(241, 244, 248);
+            BackColor = UiTheme.WindowBackground;
+            preTrayBounds = Bounds;
+            preTrayWindowState = WindowState;
 
             statusLabel = new ToolStripStatusLabel("\u6b63\u5728\u52a0\u8f7d\u5de5\u4f5c\u53f0...");
             statusStrip = new StatusStrip();
             statusStrip.Items.Add(statusLabel);
 
-            rootPanel = new TableLayoutPanel();
+            titleBarPanel = new Panel();
+            titleBarPanel.Dock = DockStyle.Top;
+            titleBarPanel.Height = TitleBarHeight;
+            titleBarPanel.BackColor = UiTheme.WindowBackground;
+            titleBarPanel.MouseDown += OnTitleBarMouseDown;
+            titleBarPanel.MouseDoubleClick += OnTitleBarMouseDoubleClick;
+            titleBarPanel.Resize += OnTitleBarResize;
+
+            titleSidebarButton = new TitleBarIconButton(TitleBarButtonKind.Sidebar);
+            titleSidebarButton.Location = new Point(10, 6);
+            titleSidebarButton.SidebarCollapsed = sidebarHidden;
+            titleSidebarButton.Click += OnSidebarToggleClicked;
+
+            titleBarLabel = new Label();
+            titleBarLabel.AutoSize = false;
+            titleBarLabel.TextAlign = ContentAlignment.MiddleLeft;
+            titleBarLabel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            titleBarLabel.ForeColor = UiTheme.TextSecondary;
+            titleBarLabel.BackColor = UiTheme.WindowBackground;
+            titleBarLabel.MouseDown += OnTitleBarMouseDown;
+            titleBarLabel.MouseDoubleClick += OnTitleBarMouseDoubleClick;
+
+            minimizeButton = new TitleBarIconButton(TitleBarButtonKind.Minimize);
+            minimizeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            minimizeButton.Click += OnTitleMinimizeClicked;
+
+            maximizeButton = new TitleBarIconButton(TitleBarButtonKind.Maximize);
+            maximizeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            maximizeButton.Click += OnTitleMaximizeClicked;
+
+            closeButton = new TitleBarIconButton(TitleBarButtonKind.Close);
+            closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            closeButton.Click += OnTitleCloseClicked;
+
+            titleBarPanel.Controls.Add(titleSidebarButton);
+            titleBarPanel.Controls.Add(titleBarLabel);
+            titleBarPanel.Controls.Add(minimizeButton);
+            titleBarPanel.Controls.Add(maximizeButton);
+            titleBarPanel.Controls.Add(closeButton);
+            LayoutTitleBarControls();
+
+            rootPanel = new Panel();
             rootPanel.Dock = DockStyle.Fill;
             rootPanel.BackColor = BackColor;
             rootPanel.Margin = new Padding(0);
             rootPanel.Padding = new Padding(0);
-            rootPanel.ColumnCount = 3;
-            rootPanel.RowCount = 1;
-            rootPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 390f));
-            rootPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 0f));
-            rootPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            rootPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            rootPanel.Resize += OnRootPanelResize;
 
             leftSidebar = new Panel();
-            leftSidebar.Dock = DockStyle.Fill;
-            leftSidebar.Width = 390;
-            leftSidebar.BackColor = Color.FromArgb(248, 250, 252);
-            leftSidebar.Padding = new Padding(16, 16, 16, 16);
+            leftSidebar.Dock = DockStyle.None;
+            leftSidebar.Width = DefaultSidebarWidth;
+            leftSidebar.BackColor = UiTheme.SidebarBackground;
+            leftSidebar.Padding = new Padding(0);
             expandedSidebarWidth = leftSidebar.Width;
 
-            collapsedSidebarPanel = new Panel();
-            collapsedSidebarPanel.Dock = DockStyle.Fill;
-            collapsedSidebarPanel.Width = 0;
-            collapsedSidebarPanel.BackColor = Color.FromArgb(248, 250, 252);
-            collapsedSidebarPanel.Padding = new Padding(4, 12, 4, 12);
+            sidebarContentPanel = new Panel();
+            sidebarContentPanel.Dock = DockStyle.None;
+            sidebarContentPanel.BackColor = UiTheme.SidebarBackground;
+            sidebarContentPanel.Padding = new Padding(16, 16, 16, 14);
 
-            expandSidebarRailButton = CreateSecondaryButton(">", 4, 12, 28);
-            expandSidebarRailButton.Anchor = AnchorStyles.Top | AnchorStyles.Left;
-            expandSidebarRailButton.Height = 64;
-            expandSidebarRailButton.Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold);
-            expandSidebarRailButton.TextAlign = ContentAlignment.MiddleCenter;
-            expandSidebarRailButton.Click += OnShowSidebarClicked;
-            collapsedSidebarPanel.Controls.Add(expandSidebarRailButton);
+            sidebarSplitter = new SidebarSplitterPanel();
+            sidebarSplitter.Dock = DockStyle.None;
+            sidebarSplitter.MouseDown += OnSidebarSplitterMouseDown;
+            sidebarSplitter.MouseMove += OnSidebarSplitterMouseMove;
+            sidebarSplitter.MouseUp += OnSidebarSplitterMouseUp;
+
+            sidebarResizeTimer = new Timer();
+            sidebarResizeTimer.Interval = SidebarResizeIntervalMs;
+            sidebarResizeTimer.Tick += OnSidebarResizeTimerTick;
+
+            trayRestoreTimer = new Timer();
+            trayRestoreTimer.Interval = 60;
+            trayRestoreTimer.Tick += OnTrayRestoreTimerTick;
 
             brandPanel = new Panel();
             brandPanel.Dock = DockStyle.Top;
             brandPanel.Height = 164;
-            brandPanel.BackColor = Color.White;
+            brandPanel.BackColor = UiTheme.SidebarBackground;
             brandPanel.Padding = new Padding(18, 16, 18, 14);
 
             TableLayoutPanel brandLayout = new TableLayoutPanel();
@@ -160,7 +256,8 @@ namespace LocalWebTrayShell
 
             appTitleLabel = new Label();
             appTitleLabel.Text = "Switch \u63a7\u5236\u53f0";
-            appTitleLabel.Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Bold);
+            appTitleLabel.Font = new Font("Microsoft YaHei UI", 13.5f, FontStyle.Bold);
+            appTitleLabel.ForeColor = UiTheme.TextPrimary;
             appTitleLabel.AutoSize = false;
             appTitleLabel.Dock = DockStyle.Fill;
             appTitleLabel.Margin = new Padding(0);
@@ -168,8 +265,8 @@ namespace LocalWebTrayShell
 
             summaryLabel = new Label();
             summaryLabel.Text = "\u672c\u5730\u7f51\u9875\u3001\u547d\u4ee4\u4e0e\u65e5\u5fd7\u7edf\u4e00\u7ba1\u7406\u3002";
-            summaryLabel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
-            summaryLabel.ForeColor = Color.FromArgb(94, 102, 116);
+            summaryLabel.Font = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Regular);
+            summaryLabel.ForeColor = UiTheme.TextSecondary;
             summaryLabel.AutoSize = false;
             summaryLabel.AutoEllipsis = true;
             summaryLabel.Dock = DockStyle.Fill;
@@ -181,36 +278,29 @@ namespace LocalWebTrayShell
             stopAllCommandsButton.Margin = new Padding(8, 2, 0, 0);
             stopAllCommandsButton.Click += OnStopAllCommandsClicked;
 
-            toggleSidebarButton = CreateSecondaryButton("\u6536\u8d77", 0, 4, 60);
-            toggleSidebarButton.Click += OnToggleSidebarClicked;
-
             webViewModeButton = CreateViewToggleButton("\u7f51\u9875", 0);
             webViewModeButton.Click += delegate { SetWorkspaceMode(WorkspaceMode.Web); };
-            webViewModeButton.Location = new Point(64, 4);
+            webViewModeButton.Location = new Point(0, 4);
             webViewModeButton.Size = new Size(76, 34);
             logsViewModeButton = CreateViewToggleButton("\u65e5\u5fd7", 1);
             logsViewModeButton.Click += delegate { SetWorkspaceMode(WorkspaceMode.Logs); };
-            logsViewModeButton.Location = new Point(144, 4);
+            logsViewModeButton.Location = new Point(80, 4);
             logsViewModeButton.Size = new Size(76, 34);
 
-            reloadSiteButton = CreateSecondaryButton("\u5237\u65b0\u9875\u9762", 224, 4, 98);
+            reloadSiteButton = CreateSecondaryButton("\u5237\u65b0\u9875\u9762", 160, 4, 98);
             reloadSiteButton.Click += OnReloadSiteClicked;
 
             TableLayoutPanel brandActionPanel = new TableLayoutPanel();
             brandActionPanel.Dock = DockStyle.Fill;
             brandActionPanel.Margin = new Padding(0);
             brandActionPanel.Padding = new Padding(0);
-            brandActionPanel.ColumnCount = 4;
+            brandActionPanel.ColumnCount = 3;
             brandActionPanel.RowCount = 1;
-            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
+            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30f));
+            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 30f));
+            brandActionPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 40f));
             brandActionPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-            toggleSidebarButton.Dock = DockStyle.Fill;
-            toggleSidebarButton.Location = Point.Empty;
-            toggleSidebarButton.Margin = new Padding(0, 4, 8, 0);
             webViewModeButton.Dock = DockStyle.Fill;
             webViewModeButton.Location = Point.Empty;
             webViewModeButton.Margin = new Padding(0, 4, 8, 0);
@@ -221,10 +311,9 @@ namespace LocalWebTrayShell
             reloadSiteButton.Location = Point.Empty;
             reloadSiteButton.Margin = new Padding(0, 4, 0, 0);
 
-            brandActionPanel.Controls.Add(toggleSidebarButton, 0, 0);
-            brandActionPanel.Controls.Add(webViewModeButton, 1, 0);
-            brandActionPanel.Controls.Add(logsViewModeButton, 2, 0);
-            brandActionPanel.Controls.Add(reloadSiteButton, 3, 0);
+            brandActionPanel.Controls.Add(webViewModeButton, 0, 0);
+            brandActionPanel.Controls.Add(logsViewModeButton, 1, 0);
+            brandActionPanel.Controls.Add(reloadSiteButton, 2, 0);
 
             brandLayout.Controls.Add(appTitleLabel, 0, 0);
             brandLayout.Controls.Add(stopAllCommandsButton, 1, 0);
@@ -237,12 +326,14 @@ namespace LocalWebTrayShell
 
             commandSection = new Panel();
             commandSection.Dock = DockStyle.Top;
-            commandSection.Height = 388;
-            commandSection.Padding = new Padding(0, 16, 0, 0);
+            commandSection.Height = 332;
+            commandSection.Padding = new Padding(0, 14, 0, 0);
+            commandSection.BackColor = UiTheme.SidebarBackground;
 
             commandSectionTitle = new Label();
             commandSectionTitle.Text = "\u547d\u4ee4";
             commandSectionTitle.Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold);
+            commandSectionTitle.ForeColor = UiTheme.TextPrimary;
             commandSectionTitle.Dock = DockStyle.Top;
             commandSectionTitle.Height = 24;
             commandSectionTitle.Margin = new Padding(0);
@@ -250,7 +341,7 @@ namespace LocalWebTrayShell
 
             commandListPanel = new BufferedScrollPanel();
             commandListPanel.Dock = DockStyle.Fill;
-            commandListPanel.BackColor = Color.FromArgb(248, 250, 252);
+            commandListPanel.BackColor = UiTheme.SidebarBackground;
             commandListPanel.BorderStyle = BorderStyle.None;
             commandListPanel.Padding = new Padding(0);
             commandListPanel.Margin = new Padding(0);
@@ -259,9 +350,14 @@ namespace LocalWebTrayShell
             commandListContent = CreateSidebarListContent();
             commandListPanel.Controls.Add(commandListContent);
 
+            commandEmptyLabel = CreateEmptyLabel("\u6682\u65e0\u547d\u4ee4\uff0c\u70b9\u51fb\u201c\u65b0\u589e\u201d\u521b\u5efa\u4e00\u4e2a\u672c\u5730\u670d\u52a1\u547d\u4ee4\u3002");
+            commandEmptyLabel.Cursor = Cursors.Hand;
+            commandEmptyLabel.Click += OnAddCommandClicked;
+            commandListPanel.Controls.Add(commandEmptyLabel);
+
             commandActionPanel = new Panel();
             commandActionPanel.Dock = DockStyle.Bottom;
-            commandActionPanel.Height = 44;
+            commandActionPanel.Height = 40;
             commandActionPanel.Margin = new Padding(0);
 
             TableLayoutPanel commandActionLayout = new TableLayoutPanel();
@@ -310,11 +406,13 @@ namespace LocalWebTrayShell
 
             siteSection = new Panel();
             siteSection.Dock = DockStyle.Fill;
-            siteSection.Padding = new Padding(0, 16, 0, 0);
+            siteSection.Padding = new Padding(0, 14, 0, 0);
+            siteSection.BackColor = UiTheme.SidebarBackground;
 
             siteSectionTitle = new Label();
             siteSectionTitle.Text = "\u7ad9\u70b9";
             siteSectionTitle.Font = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold);
+            siteSectionTitle.ForeColor = UiTheme.TextPrimary;
             siteSectionTitle.Dock = DockStyle.Top;
             siteSectionTitle.Height = 24;
             siteSectionTitle.Margin = new Padding(0);
@@ -322,7 +420,7 @@ namespace LocalWebTrayShell
 
             siteListPanel = new BufferedScrollPanel();
             siteListPanel.Dock = DockStyle.Fill;
-            siteListPanel.BackColor = Color.FromArgb(248, 250, 252);
+            siteListPanel.BackColor = UiTheme.SidebarBackground;
             siteListPanel.BorderStyle = BorderStyle.None;
             siteListPanel.Padding = new Padding(0);
             siteListPanel.Margin = new Padding(0);
@@ -331,9 +429,14 @@ namespace LocalWebTrayShell
             siteListContent = CreateSidebarListContent();
             siteListPanel.Controls.Add(siteListContent);
 
+            siteEmptyLabel = CreateEmptyLabel("\u6682\u65e0\u7ad9\u70b9\uff0c\u8bf7\u5148\u65b0\u589e\u8981\u67e5\u770b\u7684\u672c\u5730\u7f51\u9875\u3002");
+            siteEmptyLabel.Cursor = Cursors.Hand;
+            siteEmptyLabel.Click += OnAddSiteClicked;
+            siteListPanel.Controls.Add(siteEmptyLabel);
+
             siteActionPanel = new Panel();
             siteActionPanel.Dock = DockStyle.Bottom;
-            siteActionPanel.Height = 44;
+            siteActionPanel.Height = 40;
             siteActionPanel.Margin = new Padding(0);
 
             TableLayoutPanel siteActionLayout = new TableLayoutPanel();
@@ -380,72 +483,129 @@ namespace LocalWebTrayShell
             siteSection.Controls.Add(siteActionPanel);
             siteSection.Controls.Add(siteSectionTitle);
 
-            leftSidebar.Controls.Add(siteSection);
-            leftSidebar.Controls.Add(commandSection);
-            leftSidebar.Controls.Add(brandPanel);
+            sidebarContentPanel.Controls.Add(siteSection);
+            sidebarContentPanel.Controls.Add(commandSection);
+            sidebarContentPanel.Controls.Add(brandPanel);
+            leftSidebar.Controls.Add(sidebarContentPanel);
 
             workspacePanel = new Panel();
-            workspacePanel.Dock = DockStyle.Fill;
-            workspacePanel.Padding = new Padding(18, 18, 18, 18);
+            workspacePanel.Dock = DockStyle.None;
+            workspacePanel.Padding = new Padding(14, 14, 14, 14);
             workspacePanel.BackColor = BackColor;
 
             rightBody = new Panel();
-            rightBody.Dock = DockStyle.Fill;
+            rightBody.Dock = DockStyle.None;
             rightBody.Padding = new Padding(0);
 
             webPanel = new Panel();
             webPanel.Dock = DockStyle.Fill;
-            webPanel.BackColor = Color.White;
-            webPanel.Padding = new Padding(16, 16, 16, 16);
+            webPanel.BackColor = UiTheme.Surface;
+            webPanel.Padding = new Padding(12);
 
             webViewHost = new Panel();
             webViewHost.Dock = DockStyle.Fill;
-            webViewHost.BackColor = Color.FromArgb(225, 230, 236);
+            webViewHost.BackColor = Color.FromArgb(221, 232, 242);
             webViewHost.Padding = new Padding(0);
 
+            webStateOverlay = new Panel();
+            webStateOverlay.BackColor = Color.FromArgb(221, 232, 242);
+            webStateOverlay.Dock = DockStyle.Fill;
+            webStateOverlay.Visible = true;
+
+            TableLayoutPanel webStateLayout = new TableLayoutPanel();
+            webStateLayout.Dock = DockStyle.Fill;
+            webStateLayout.ColumnCount = 3;
+            webStateLayout.RowCount = 5;
+            webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 420f));
+            webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
+
+            webStateTitleLabel = new Label();
+            webStateTitleLabel.Dock = DockStyle.Fill;
+            webStateTitleLabel.Font = new Font("Microsoft YaHei UI", 13f, FontStyle.Bold);
+            webStateTitleLabel.ForeColor = UiTheme.TextPrimary;
+            webStateTitleLabel.TextAlign = ContentAlignment.BottomCenter;
+            webStateTitleLabel.Text = "\u6b63\u5728\u51c6\u5907\u7f51\u9875\u5de5\u4f5c\u533a";
+
+            webStateDetailLabel = new Label();
+            webStateDetailLabel.Dock = DockStyle.Fill;
+            webStateDetailLabel.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular);
+            webStateDetailLabel.ForeColor = UiTheme.TextSecondary;
+            webStateDetailLabel.TextAlign = ContentAlignment.TopCenter;
+            webStateDetailLabel.AutoEllipsis = true;
+            webStateDetailLabel.Text = "\u7b49\u5f85 WebView2 \u521d\u59cb\u5316\u3002";
+
+            webStateRetryButton = CreatePrimaryButton("\u91cd\u8bd5", 0, 0, 96);
+            webStateRetryButton.Dock = DockStyle.Top;
+            webStateRetryButton.Margin = new Padding(156, 2, 156, 0);
+            webStateRetryButton.Click += OnReloadSiteClicked;
+
+            webStateLayout.Controls.Add(webStateTitleLabel, 1, 1);
+            webStateLayout.Controls.Add(webStateDetailLabel, 1, 2);
+            webStateLayout.Controls.Add(webStateRetryButton, 1, 3);
+            webStateOverlay.Controls.Add(webStateLayout);
+
             webPanel.Controls.Add(webViewHost);
+            webViewHost.Controls.Add(webStateOverlay);
 
             logsPanel = new Panel();
             logsPanel.Dock = DockStyle.Fill;
-            logsPanel.BackColor = Color.White;
-            logsPanel.Padding = new Padding(16, 16, 16, 16);
+            logsPanel.BackColor = UiTheme.Surface;
+            logsPanel.Padding = new Padding(12);
 
             currentCommandLabel = new Label();
             currentCommandLabel.Text = "\u672a\u9009\u62e9\u547d\u4ee4";
-            currentCommandLabel.Font = new Font("Microsoft YaHei UI", 12f, FontStyle.Bold);
+            currentCommandLabel.Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold);
+            currentCommandLabel.ForeColor = UiTheme.TextPrimary;
             currentCommandLabel.AutoSize = true;
-            currentCommandLabel.Location = new Point(0, 4);
+            currentCommandLabel.Dock = DockStyle.Fill;
+            currentCommandLabel.TextAlign = ContentAlignment.MiddleLeft;
+            currentCommandLabel.AutoEllipsis = true;
 
-            commandStatusBadge = new Label();
+            commandStatusBadge = UiTheme.CreateBadgeLabel();
             commandStatusBadge.Text = "\u5df2\u505c\u6b62";
-            commandStatusBadge.AutoSize = false;
-            commandStatusBadge.TextAlign = ContentAlignment.MiddleCenter;
             commandStatusBadge.Size = new Size(104, 30);
-            commandStatusBadge.Location = new Point(340, 0);
-            commandStatusBadge.BackColor = Color.FromArgb(234, 239, 244);
-            commandStatusBadge.ForeColor = Color.FromArgb(79, 89, 100);
-            commandStatusBadge.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            commandStatusBadge.Dock = DockStyle.Right;
+            commandStatusBadge.BackColor = UiTheme.BadgeNeutralBackground;
+            commandStatusBadge.ForeColor = UiTheme.BadgeNeutralForeground;
 
             clearLogsButton = CreateSecondaryButton("\u6e05\u7a7a\u65e5\u5fd7", 0, 0, 96);
             clearLogsButton.Click += OnClearLogsClicked;
             copyLogsButton = CreateSecondaryButton("\u590d\u5236\u65e5\u5fd7", 108, 0, 96);
             copyLogsButton.Click += OnCopyLogsClicked;
+            autoScrollLogsCheckBox = new CheckBox();
+            autoScrollLogsCheckBox.Text = "\u81ea\u52a8\u6eda\u52a8";
+            autoScrollLogsCheckBox.Checked = true;
+            autoScrollLogsCheckBox.AutoSize = true;
+            autoScrollLogsCheckBox.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            autoScrollLogsCheckBox.ForeColor = UiTheme.TextSecondary;
+            autoScrollLogsCheckBox.Location = new Point(0, 8);
+            autoScrollLogsCheckBox.CheckedChanged += OnAutoScrollLogsChanged;
 
             Panel logsToolbar = new Panel();
             logsToolbar.Dock = DockStyle.Top;
             logsToolbar.Height = 44;
+            logsToolbar.BackColor = UiTheme.Surface;
 
             Panel logsTitlePanel = new Panel();
             logsTitlePanel.Dock = DockStyle.Left;
-            logsTitlePanel.Width = 470;
-            logsTitlePanel.Controls.Add(currentCommandLabel);
+            logsTitlePanel.Width = 560;
             logsTitlePanel.Controls.Add(commandStatusBadge);
+            logsTitlePanel.Controls.Add(currentCommandLabel);
 
             Panel logsActionPanel = new Panel();
             logsActionPanel.Dock = DockStyle.Right;
-            logsActionPanel.Width = 210;
+            logsActionPanel.Width = 330;
             logsActionPanel.Controls.Add(clearLogsButton);
             logsActionPanel.Controls.Add(copyLogsButton);
+            logsActionPanel.Controls.Add(autoScrollLogsCheckBox);
+            clearLogsButton.Location = new Point(126, 0);
+            copyLogsButton.Location = new Point(228, 0);
 
             logsToolbar.Controls.Add(logsActionPanel);
             logsToolbar.Controls.Add(logsTitlePanel);
@@ -456,8 +616,8 @@ namespace LocalWebTrayShell
             logsTextBox.ReadOnly = true;
             logsTextBox.ScrollBars = ScrollBars.Both;
             logsTextBox.WordWrap = false;
-            logsTextBox.BackColor = Color.FromArgb(15, 23, 32);
-            logsTextBox.ForeColor = Color.FromArgb(221, 230, 242);
+            logsTextBox.BackColor = Color.FromArgb(14, 22, 32);
+            logsTextBox.ForeColor = Color.FromArgb(228, 236, 246);
             logsTextBox.Font = new Font("Cascadia Mono", 10f, FontStyle.Regular);
 
             logsPanel.Controls.Add(logsTextBox);
@@ -468,16 +628,18 @@ namespace LocalWebTrayShell
 
             workspacePanel.Controls.Add(rightBody);
 
-            rootPanel.Controls.Add(leftSidebar, 0, 0);
-            rootPanel.Controls.Add(collapsedSidebarPanel, 1, 0);
-            rootPanel.Controls.Add(workspacePanel, 2, 0);
+            rootPanel.Controls.Add(leftSidebar);
+            rootPanel.Controls.Add(sidebarSplitter);
+            rootPanel.Controls.Add(workspacePanel);
+            LayoutShellPanels();
 
             Controls.Add(rootPanel);
             Controls.Add(statusStrip);
+            Controls.Add(titleBarPanel);
 
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("\u6253\u5f00\u4e3b\u754c\u9762", null, delegate { RestoreFromTray(); });
-            trayMenu.Items.Add("\u663e\u793a\u63a7\u5236\u53f0", null, delegate { RestoreFromTray(); SetSidebarHidden(false); });
+            trayMenu.Items.Add("\u663e\u793a\u63a7\u5236\u53f0", null, delegate { RestoreFromTray(); SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth); });
             trayMenu.Items.Add("\u5237\u65b0\u5f53\u524d\u9875\u9762", null, delegate { ReloadCurrentSite(); });
             trayMenu.Items.Add("\u5168\u90e8\u505c\u6b62\u547d\u4ee4", null, delegate { commandManager.StopAll(); });
             trayStartupMenuItem = new ToolStripMenuItem("\u5f00\u673a\u81ea\u542f");
@@ -522,17 +684,18 @@ namespace LocalWebTrayShell
                     null,
                     AppPaths.WebViewUserDataDirectory);
 
-                statusLabel.Text = "\u5de5\u4f5c\u53f0\u5df2\u5c31\u7eea\u3002";
+                SetTransientStatus("\u5de5\u4f5c\u53f0\u5df2\u5c31\u7eea\u3002");
+                SetWebState("\u7f51\u9875\u5de5\u4f5c\u533a\u5df2\u5c31\u7eea", "\u8bf7\u9009\u62e9\u4e00\u4e2a\u7ad9\u70b9\u6216\u7b49\u5f85\u9ed8\u8ba4\u7ad9\u70b9\u52a0\u8f7d\u3002", false);
                 uiRefreshTimer.Start();
+
+                if (commands.Count > 0)
+                {
+                    SelectCommand(commands[0], false);
+                }
 
                 if (sites.Count > 0)
                 {
                     SelectSite(sites[0]);
-                }
-
-                if (commands.Count > 0)
-                {
-                    SelectCommand(commands[0]);
                 }
 
                 if (!startupCommandsRequested)
@@ -543,13 +706,113 @@ namespace LocalWebTrayShell
             }
             catch (Exception ex)
             {
-                statusLabel.Text = "WebView2 \u521d\u59cb\u5316\u5931\u8d25\u3002";
+                SetTransientStatus("WebView2 \u521d\u59cb\u5316\u5931\u8d25\u3002");
+                SetWebState("WebView2 \u521d\u59cb\u5316\u5931\u8d25", ex.Message, false);
                 MessageBox.Show(
                     "\u65e0\u6cd5\u521d\u59cb\u5316 WebView2\u3002\r\n\r\n" + ex.Message,
                     AppName,
                     MessageBoxButtons.OK,
-                    MessageBoxIcon.Error);
+                MessageBoxIcon.Error);
             }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (!allowExit &&
+                m.Msg == WM_SYSCOMMAND &&
+                ((int)m.WParam & 0xFFF0) == SC_CLOSE)
+            {
+                QueueHideToTray();
+                return;
+            }
+
+            if (m.Msg == WM_NCHITTEST)
+            {
+                HandleWindowHitTest(ref m);
+                return;
+            }
+
+            base.WndProc(ref m);
+        }
+
+        private void HandleWindowHitTest(ref Message m)
+        {
+            Point clientPoint = PointToClient(new Point(
+                unchecked((short)((long)m.LParam & 0xFFFF)),
+                unchecked((short)(((long)m.LParam >> 16) & 0xFFFF))));
+            bool left = clientPoint.X <= ResizeGripSize;
+            bool right = clientPoint.X >= ClientSize.Width - ResizeGripSize;
+            bool top = clientPoint.Y <= ResizeGripSize;
+            bool bottom = clientPoint.Y >= ClientSize.Height - ResizeGripSize;
+
+            if (left && top)
+            {
+                m.Result = new IntPtr(HTTOPLEFT);
+                return;
+            }
+
+            if (right && top)
+            {
+                m.Result = new IntPtr(HTTOPRIGHT);
+                return;
+            }
+
+            if (left && bottom)
+            {
+                m.Result = new IntPtr(HTBOTTOMLEFT);
+                return;
+            }
+
+            if (right && bottom)
+            {
+                m.Result = new IntPtr(HTBOTTOMRIGHT);
+                return;
+            }
+
+            if (left)
+            {
+                m.Result = new IntPtr(HTLEFT);
+                return;
+            }
+
+            if (right)
+            {
+                m.Result = new IntPtr(HTRIGHT);
+                return;
+            }
+
+            if (top)
+            {
+                m.Result = new IntPtr(HTTOP);
+                return;
+            }
+
+            if (bottom)
+            {
+                m.Result = new IntPtr(HTBOTTOM);
+                return;
+            }
+
+            if (clientPoint.Y >= 0 &&
+                clientPoint.Y < TitleBarHeight &&
+                !IsPointOverTitleBarControl(clientPoint))
+            {
+                m.Result = new IntPtr(HTCAPTION);
+                return;
+            }
+
+            m.Result = new IntPtr(HTCLIENT);
+        }
+
+        private bool IsPointOverTitleBarControl(Point clientPoint)
+        {
+            Point titlePoint = titleBarPanel.PointToClient(PointToScreen(clientPoint));
+            Control child = titleBarPanel.GetChildAtPoint(titlePoint);
+
+            return child == titleSidebarButton ||
+                child == minimizeButton ||
+                child == maximizeButton ||
+                child == closeButton;
         }
 
         private void OnUiRefreshTimerTick(object sender, EventArgs e)
@@ -611,6 +874,7 @@ namespace LocalWebTrayShell
             }
 
             ConstrainSidebarListWidth(commandListPanel, commandListContent);
+            RefreshEmptyStates();
         }
 
         private void RefreshSiteList()
@@ -647,6 +911,7 @@ namespace LocalWebTrayShell
             }
 
             ConstrainSidebarListWidth(siteListPanel, siteListContent);
+            RefreshEmptyStates();
         }
 
         private void OnCommandCardClicked(object sender, EventArgs e)
@@ -671,11 +936,21 @@ namespace LocalWebTrayShell
 
         private void SelectCommand(CommandEntry command)
         {
+            SelectCommand(command, true);
+        }
+
+        private void SelectCommand(CommandEntry command, bool switchToLogs)
+        {
             currentCommand = command;
             UpdateCommandSelectionVisuals();
             RefreshCommandButtons();
             RefreshLogsView();
-            SetWorkspaceMode(WorkspaceMode.Logs);
+            lastLogAutoScrollEnabled = true;
+
+            if (switchToLogs)
+            {
+                SetWorkspaceMode(WorkspaceMode.Logs);
+            }
         }
 
         private void SelectSite(SiteEntry site)
@@ -697,7 +972,8 @@ namespace LocalWebTrayShell
 
             if (webViewEnvironment == null)
             {
-                statusLabel.Text = "\u7f51\u9875\u5de5\u4f5c\u533a\u4ecd\u5728\u542f\u52a8\u4e2d\u3002";
+                SetTransientStatus("\u7f51\u9875\u5de5\u4f5c\u533a\u4ecd\u5728\u542f\u52a8\u4e2d\u3002");
+                SetWebState("\u7f51\u9875\u5de5\u4f5c\u533a\u4ecd\u5728\u542f\u52a8\u4e2d", site.Url, false);
                 return;
             }
 
@@ -710,9 +986,13 @@ namespace LocalWebTrayShell
 
             state.WebView.Visible = true;
             state.WebView.BringToFront();
-            statusLabel.Text = state.IsInitialized
+            SetWebState(
+                state.IsInitialized ? string.Empty : "\u6b63\u5728\u6253\u5f00 " + site.Name,
+                state.IsInitialized ? string.Empty : site.Url,
+                false);
+            SetTransientStatus(state.IsInitialized
                 ? "\u5df2\u5207\u6362\u5230 " + site.Name
-                : "\u6b63\u5728\u6253\u5f00 " + site.Name + "...";
+                : "\u6b63\u5728\u6253\u5f00 " + site.Name + "...");
 
             if (state.InitializationStarted)
             {
@@ -722,6 +1002,11 @@ namespace LocalWebTrayShell
                 {
                     state.LastNavigatedUrl = site.Url;
                     state.WebView.CoreWebView2.Navigate(site.Url);
+                }
+
+                if (state.IsInitialized)
+                {
+                    SetWebState(string.Empty, string.Empty, false);
                 }
 
                 return;
@@ -737,10 +1022,13 @@ namespace LocalWebTrayShell
                 state.IsInitialized = true;
                 state.LastNavigatedUrl = site.Url;
                 state.WebView.CoreWebView2.Navigate(site.Url);
+                SetWebState("\u6b63\u5728\u52a0\u8f7d " + site.Name, site.Url, false);
             }
             catch (Exception ex)
             {
-                statusLabel.Text = "\u65e0\u6cd5\u6253\u5f00 " + site.Name;
+                state.InitializationStarted = false;
+                SetTransientStatus("\u65e0\u6cd5\u6253\u5f00 " + site.Name);
+                SetWebState("\u65e0\u6cd5\u6253\u5f00 " + site.Name, ex.Message, true);
                 MessageBox.Show(
                     "\u65e0\u6cd5\u6253\u5f00 " + site.Url + "\u3002\r\n\r\n" + ex.Message,
                     AppName,
@@ -781,7 +1069,8 @@ namespace LocalWebTrayShell
             if (state != null && currentSite != null &&
                 string.Equals(state.Site.Id, currentSite.Id, StringComparison.OrdinalIgnoreCase))
             {
-                statusLabel.Text = "\u6b63\u5728\u52a0\u8f7d " + state.Site.Name + " - " + e.Uri;
+                SetTransientStatus("\u6b63\u5728\u52a0\u8f7d " + state.Site.Name + " - " + e.Uri, 1);
+                SetWebState("\u6b63\u5728\u52a0\u8f7d " + state.Site.Name, e.Uri, false);
             }
         }
 
@@ -795,9 +1084,13 @@ namespace LocalWebTrayShell
                 return;
             }
 
-            statusLabel.Text = e.IsSuccess
+            SetTransientStatus(e.IsSuccess
                 ? "\u5df2\u52a0\u8f7d " + state.Site.Name
-                : "\u65e0\u6cd5\u8bbf\u95ee " + state.Site.Url;
+                : "\u65e0\u6cd5\u8bbf\u95ee " + state.Site.Url);
+            SetWebState(
+                e.IsSuccess ? string.Empty : "\u65e0\u6cd5\u8bbf\u95ee " + state.Site.Name,
+                e.IsSuccess ? string.Empty : state.Site.Url,
+                !e.IsSuccess);
         }
 
         private SiteViewState GetSiteState(object sender)
@@ -810,6 +1103,26 @@ namespace LocalWebTrayShell
             }
 
             return webView.Tag as SiteViewState;
+        }
+
+        private void SetWebState(string title, string detail, bool canRetry)
+        {
+            if (webStateOverlay == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(title) && string.IsNullOrWhiteSpace(detail))
+            {
+                webStateOverlay.Visible = false;
+                return;
+            }
+
+            webStateTitleLabel.Text = title ?? string.Empty;
+            webStateDetailLabel.Text = detail ?? string.Empty;
+            webStateRetryButton.Visible = canRetry;
+            webStateOverlay.Visible = true;
+            webStateOverlay.BringToFront();
         }
 
         private void OnAddCommandClicked(object sender, EventArgs e)
@@ -907,6 +1220,7 @@ namespace LocalWebTrayShell
             else
             {
                 UpdateCommandSelectionVisuals();
+                RefreshCommandButtons();
                 RefreshLogsView();
             }
         }
@@ -1070,7 +1384,7 @@ namespace LocalWebTrayShell
 
             if (currentSite == null)
             {
-                statusLabel.Text = "\u5f53\u524d\u672a\u9009\u62e9\u7ad9\u70b9\u3002";
+                SetTransientStatus("\u5f53\u524d\u672a\u9009\u62e9\u7ad9\u70b9\u3002");
                 return;
             }
 
@@ -1088,7 +1402,8 @@ namespace LocalWebTrayShell
                     state.WebView.CoreWebView2.Reload();
                 }
 
-                statusLabel.Text = "\u6b63\u5728\u5237\u65b0 " + currentSite.Name + "...";
+                SetTransientStatus("\u6b63\u5728\u5237\u65b0 " + currentSite.Name + "...");
+                SetWebState("\u6b63\u5728\u5237\u65b0 " + currentSite.Name, currentSite.Url, false);
                 return;
             }
 
@@ -1111,7 +1426,7 @@ namespace LocalWebTrayShell
                 try
                 {
                     Clipboard.SetText(logsTextBox.Text);
-                    statusLabel.Text = "\u65e5\u5fd7\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\u3002";
+                    SetTransientStatus("\u65e5\u5fd7\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\u3002");
                 }
                 catch (Exception ex)
                 {
@@ -1122,6 +1437,19 @@ namespace LocalWebTrayShell
                         MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void OnAutoScrollLogsChanged(object sender, EventArgs e)
+        {
+            if (!autoScrollLogsCheckBox.Checked)
+            {
+                lastLogAutoScrollEnabled = false;
+                return;
+            }
+
+            lastLogAutoScrollEnabled = true;
+            logsTextBox.SelectionStart = logsTextBox.TextLength;
+            logsTextBox.ScrollToCaret();
         }
 
         private void RefreshCommandButtons()
@@ -1144,6 +1472,9 @@ namespace LocalWebTrayShell
             if (!hasCommand)
             {
                 startStopCommandButton.Text = "\u542f\u52a8";
+                editCommandButton.Enabled = false;
+                deleteCommandButton.Enabled = false;
+                startStopCommandButton.Enabled = false;
                 return;
             }
 
@@ -1171,6 +1502,8 @@ namespace LocalWebTrayShell
                 commandStatusBadge.Text = "\u5df2\u505c\u6b62";
                 ApplyBadgeStyle(commandStatusBadge, CommandStatus.Stopped);
                 logsTextBox.Text = string.Empty;
+                clearLogsButton.Enabled = false;
+                copyLogsButton.Enabled = false;
                 lastLogAutoScrollEnabled = true;
                 return;
             }
@@ -1180,7 +1513,9 @@ namespace LocalWebTrayShell
             currentCommandLabel.Text = currentCommand.Name;
             commandStatusBadge.Text = snapshot.GetDisplayStatus();
             ApplyBadgeStyle(commandStatusBadge, snapshot.Status);
-            bool shouldAutoScroll = IsNearBottom(logsTextBox);
+            clearLogsButton.Enabled = lines.Length > 0;
+            copyLogsButton.Enabled = lines.Length > 0;
+            bool shouldAutoScroll = autoScrollLogsCheckBox.Checked || IsNearBottom(logsTextBox);
             string newText = string.Join(Environment.NewLine, lines);
 
             if (!string.Equals(logsTextBox.Text, newText, StringComparison.Ordinal))
@@ -1188,13 +1523,13 @@ namespace LocalWebTrayShell
                 logsTextBox.Text = newText;
             }
 
-            if (lines.Length > 0 && (shouldAutoScroll || lastLogAutoScrollEnabled))
+            if (lines.Length > 0 && autoScrollLogsCheckBox.Checked && (shouldAutoScroll || lastLogAutoScrollEnabled))
             {
                 logsTextBox.SelectionStart = logsTextBox.TextLength;
                 logsTextBox.ScrollToCaret();
             }
 
-            lastLogAutoScrollEnabled = shouldAutoScroll;
+            lastLogAutoScrollEnabled = autoScrollLogsCheckBox.Checked && shouldAutoScroll;
         }
 
         private void SetWorkspaceMode(WorkspaceMode mode)
@@ -1204,9 +1539,9 @@ namespace LocalWebTrayShell
             logsPanel.Visible = mode == WorkspaceMode.Logs;
             ApplyViewToggleState(webViewModeButton, mode == WorkspaceMode.Web);
             ApplyViewToggleState(logsViewModeButton, mode == WorkspaceMode.Logs);
-            Text = mode == WorkspaceMode.Web
+            SetWindowTitle(mode == WorkspaceMode.Web
                 ? currentSite == null ? AppName : AppName + " - " + currentSite.Name
-                : currentCommand == null ? AppName : AppName + " - " + currentCommand.Name;
+                : currentCommand == null ? AppName : AppName + " - " + currentCommand.Name);
 
             if (mode == WorkspaceMode.Web && currentSite != null)
             {
@@ -1218,35 +1553,293 @@ namespace LocalWebTrayShell
             }
         }
 
-        private void OnToggleSidebarClicked(object sender, EventArgs e)
+        private void SetWindowTitle(string title)
         {
-            SetSidebarHidden(!sidebarHidden);
-        }
+            string displayTitle = title ?? AppName;
 
-        private void OnShowSidebarClicked(object sender, EventArgs e)
-        {
-            SetSidebarHidden(false);
-        }
+            Text = displayTitle;
 
-        private void SetSidebarHidden(bool hidden)
-        {
-            sidebarHidden = hidden;
-            if (!hidden && expandedSidebarWidth <= 0)
+            if (titleBarLabel != null)
             {
-                expandedSidebarWidth = 390;
+                titleBarLabel.Text = displayTitle;
+            }
+        }
+
+        private void OnSidebarSplitterMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
             }
 
-            rootPanel.ColumnStyles[0].Width = hidden ? 0f : expandedSidebarWidth;
-            rootPanel.ColumnStyles[1].Width = hidden ? 44f : 0f;
-            leftSidebar.Padding = new Padding(16, 16, 16, 16);
-            toggleSidebarButton.Text = hidden ? ">" : "\u6536\u8d77";
-            collapsedSidebarPanel.Visible = hidden;
-            leftSidebar.Visible = !hidden;
-            rootPanel.PerformLayout();
-            workspacePanel.PerformLayout();
-            statusLabel.Text = hidden
-                ? "\u5de6\u4fa7\u63a7\u5236\u53f0\u5df2\u9690\u85cf\u3002"
-                : "\u5de6\u4fa7\u63a7\u5236\u53f0\u5df2\u5c55\u5f00\u3002";
+            resizingSidebar = true;
+            sidebarDragStartX = PointToClient(sidebarSplitter.PointToScreen(e.Location)).X;
+            sidebarDragStartWidth = GetCurrentSidebarLayoutWidth();
+            sidebarPendingWidth = sidebarDragStartWidth;
+            sidebarSplitter.Active = true;
+            sidebarSplitter.Capture = true;
+            workspacePanel.SendToBack();
+            leftSidebar.BringToFront();
+            sidebarSplitter.BringToFront();
+            FreezeSidebarContentForDrag();
+            FreezeWorkspaceContentForSidebarDrag();
+            sidebarResizeTimer.Start();
+        }
+
+        private void OnSidebarSplitterMouseMove(object sender, MouseEventArgs e)
+        {
+            int currentX;
+            int delta;
+            int targetWidth;
+
+            if (!resizingSidebar)
+            {
+                return;
+            }
+
+            currentX = PointToClient(sidebarSplitter.PointToScreen(e.Location)).X;
+            delta = currentX - sidebarDragStartX;
+            targetWidth = sidebarDragStartWidth + delta;
+
+            sidebarPendingWidth = targetWidth;
+        }
+
+        private void OnSidebarSplitterMouseUp(object sender, MouseEventArgs e)
+        {
+            int currentX;
+            int delta;
+
+            if (!resizingSidebar)
+            {
+                return;
+            }
+
+            currentX = PointToClient(sidebarSplitter.PointToScreen(e.Location)).X;
+            delta = currentX - sidebarDragStartX;
+            sidebarPendingWidth = sidebarDragStartWidth + delta;
+            resizingSidebar = false;
+            sidebarResizeTimer.Stop();
+            ApplyPendingSidebarResize();
+            sidebarFrozenContentWidth = 0;
+            sidebarFrozenWorkspaceContentWidth = 0;
+            LayoutShellPanels(true);
+            sidebarSplitter.Capture = false;
+            sidebarSplitter.Active = false;
+            SnapSidebarWidth();
+        }
+
+        private void OnSidebarToggleClicked(object sender, EventArgs e)
+        {
+            if (sidebarHidden)
+            {
+                SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth);
+                SetTransientStatus("\u5de6\u4fa7\u9762\u677f\u5df2\u5c55\u5f00\u3002", 2);
+                return;
+            }
+
+            SetSidebarWidth(0);
+            SetTransientStatus("\u5de6\u4fa7\u9762\u677f\u5df2\u6298\u53e0\u3002", 2);
+        }
+
+        private void OnSidebarResizeTimerTick(object sender, EventArgs e)
+        {
+            if (!resizingSidebar)
+            {
+                sidebarResizeTimer.Stop();
+                return;
+            }
+
+            ApplyPendingSidebarResize();
+        }
+
+        private void ApplyPendingSidebarResize()
+        {
+            SetSidebarWidth(sidebarPendingWidth);
+        }
+
+        private int GetCurrentSidebarLayoutWidth()
+        {
+            return sidebarHidden ? 0 : expandedSidebarWidth;
+        }
+
+        private void SetSidebarWidth(int requestedWidth)
+        {
+            int width;
+            int currentWidth;
+            bool needsFinalWorkspaceLayout;
+
+            width = GetEffectiveSidebarWidth(requestedWidth);
+            needsFinalWorkspaceLayout = !resizingSidebar && rightBody.Width != GetWorkspaceContentWidth();
+
+            if (width <= 0)
+            {
+                if (sidebarHidden && !leftSidebar.Visible)
+                {
+                    if (needsFinalWorkspaceLayout)
+                    {
+                        LayoutShellPanels(true);
+                    }
+
+                    return;
+                }
+
+                sidebarHidden = true;
+                leftSidebar.Visible = false;
+                sidebarSplitter.Collapsed = true;
+                titleSidebarButton.SidebarCollapsed = true;
+                LayoutShellPanels(!resizingSidebar);
+                return;
+            }
+
+            currentWidth = GetCurrentSidebarLayoutWidth();
+
+            if (!sidebarHidden &&
+                leftSidebar.Visible &&
+                Math.Abs(currentWidth - width) < 2 &&
+                !needsFinalWorkspaceLayout)
+            {
+                return;
+            }
+
+            sidebarHidden = false;
+            expandedSidebarWidth = width;
+            leftSidebar.Visible = true;
+            sidebarSplitter.Collapsed = false;
+            titleSidebarButton.SidebarCollapsed = false;
+            LayoutShellPanels(!resizingSidebar);
+        }
+
+        private int GetEffectiveSidebarWidth(int requestedWidth)
+        {
+            if (requestedWidth <= SidebarCollapseThreshold)
+            {
+                return 0;
+            }
+
+            return Math.Max(SidebarMinExpandedWidth, Math.Min(SidebarMaxWidth, requestedWidth));
+        }
+
+        private void OnRootPanelResize(object sender, EventArgs e)
+        {
+            LayoutShellPanels(!resizingSidebar);
+        }
+
+        private void LayoutShellPanels()
+        {
+            LayoutShellPanels(true);
+        }
+
+        private void LayoutShellPanels(bool resizeWorkspaceContent)
+        {
+            int sidebarWidth = sidebarHidden ? 0 : expandedSidebarWidth;
+            int splitterWidth = Math.Min(SidebarSplitterWidth, rootPanel.ClientSize.Width);
+            int workspaceX = Math.Min(rootPanel.ClientSize.Width, sidebarWidth + splitterWidth);
+            int workspaceWidth = Math.Max(0, rootPanel.ClientSize.Width - workspaceX);
+            int height = rootPanel.ClientSize.Height;
+
+            rootPanel.SuspendLayout();
+            SetBoundsIfChanged(leftSidebar, 0, 0, sidebarWidth, height);
+            SetBoundsIfChanged(sidebarSplitter, sidebarWidth, 0, splitterWidth, height);
+            LayoutSidebarContent(resizeWorkspaceContent);
+            if (resizeWorkspaceContent)
+            {
+                SetBoundsIfChanged(workspacePanel, workspaceX, 0, workspaceWidth, height);
+            }
+            rootPanel.ResumeLayout(false);
+            if (resizeWorkspaceContent)
+            {
+                LayoutWorkspaceContent(true);
+            }
+        }
+
+        private static void SetBoundsIfChanged(Control control, int x, int y, int width, int height)
+        {
+            Rectangle bounds = new Rectangle(x, y, width, height);
+
+            if (control.Bounds == bounds)
+            {
+                return;
+            }
+
+            control.Bounds = bounds;
+        }
+
+        private void FreezeSidebarContentForDrag()
+        {
+            sidebarFrozenContentWidth = sidebarContentPanel.Width > 0
+                ? sidebarContentPanel.Width
+                : Math.Max(SidebarMinExpandedWidth, expandedSidebarWidth);
+
+            SetSidebarContentBounds(sidebarFrozenContentWidth);
+        }
+
+        private void LayoutSidebarContent(bool resizeContent)
+        {
+            int contentWidth = resizeContent
+                ? (sidebarHidden ? 0 : expandedSidebarWidth)
+                : sidebarFrozenContentWidth > 0
+                    ? sidebarFrozenContentWidth
+                    : sidebarContentPanel.Width;
+
+            SetSidebarContentBounds(contentWidth);
+        }
+
+        private void SetSidebarContentBounds(int contentWidth)
+        {
+            SetBoundsIfChanged(
+                sidebarContentPanel,
+                0,
+                0,
+                Math.Max(0, contentWidth),
+                leftSidebar.Height);
+        }
+
+        private void FreezeWorkspaceContentForSidebarDrag()
+        {
+            sidebarFrozenWorkspaceContentWidth = rightBody.Width > 0
+                ? rightBody.Width
+                : GetWorkspaceContentWidth();
+
+            SetWorkspaceContentBounds(sidebarFrozenWorkspaceContentWidth);
+        }
+
+        private void LayoutWorkspaceContent(bool resizeContent)
+        {
+            int contentWidth = resizeContent
+                ? GetWorkspaceContentWidth()
+                : sidebarFrozenWorkspaceContentWidth > 0
+                    ? sidebarFrozenWorkspaceContentWidth
+                    : rightBody.Width;
+
+            SetWorkspaceContentBounds(contentWidth);
+        }
+
+        private int GetWorkspaceContentWidth()
+        {
+            return Math.Max(0, workspacePanel.ClientSize.Width - workspacePanel.Padding.Horizontal);
+        }
+
+        private void SetWorkspaceContentBounds(int contentWidth)
+        {
+            int contentHeight = Math.Max(0, workspacePanel.ClientSize.Height - workspacePanel.Padding.Vertical);
+
+            SetBoundsIfChanged(
+                rightBody,
+                workspacePanel.Padding.Left,
+                workspacePanel.Padding.Top,
+                Math.Max(0, contentWidth),
+                contentHeight);
+        }
+
+        private void SnapSidebarWidth()
+        {
+            if (sidebarHidden)
+            {
+                SetTransientStatus("\u5de6\u4fa7\u63a7\u5236\u53f0\u5df2\u6298\u53e0\u3002");
+                return;
+            }
+
+            SetTransientStatus("\u5de6\u4fa7\u63a7\u5236\u53f0\u5bbd\u5ea6\u5df2\u8c03\u6574\u3002", 2);
         }
 
         private void UpdateStatusSummary()
@@ -1264,6 +1857,24 @@ namespace LocalWebTrayShell
                 sites.Count + " \u4e2a\uff0c" +
                 startupText + "\u3002";
             notifyIcon.Text = AppName + " - \u8fd0\u884c\u4e2d " + running + "/" + commands.Count;
+
+            if (DateTime.UtcNow >= statusSummaryHoldUntilUtc)
+            {
+                statusLabel.Text = "\u8fd0\u884c\u4e2d " + running + "/" + commands.Count +
+                    "\uff0c\u7b49\u5f85\u91cd\u8bd5 " + waitingRetry +
+                    "\uff0c\u7ad9\u70b9 " + sites.Count + "\u3002";
+            }
+        }
+
+        private void SetTransientStatus(string message)
+        {
+            SetTransientStatus(message, 3);
+        }
+
+        private void SetTransientStatus(string message, int holdSeconds)
+        {
+            statusLabel.Text = message ?? string.Empty;
+            statusSummaryHoldUntilUtc = DateTime.UtcNow.AddSeconds(Math.Max(1, holdSeconds));
         }
 
         private void RefreshCommandCardsState()
@@ -1309,11 +1920,13 @@ namespace LocalWebTrayShell
         private void OnCommandListPanelResize(object sender, EventArgs e)
         {
             ConstrainSidebarListWidth(commandListPanel, commandListContent);
+            LayoutEmptyState(commandListPanel, commandEmptyLabel);
         }
 
         private void OnSiteListPanelResize(object sender, EventArgs e)
         {
             ConstrainSidebarListWidth(siteListPanel, siteListContent);
+            LayoutEmptyState(siteListPanel, siteEmptyLabel);
         }
 
         private void ConstrainSidebarListWidth(BufferedScrollPanel scrollPanel, Control content)
@@ -1346,9 +1959,48 @@ namespace LocalWebTrayShell
             panel.ColumnCount = 1;
             panel.RowCount = 0;
             panel.GrowStyle = TableLayoutPanelGrowStyle.AddRows;
-            panel.BackColor = Color.FromArgb(248, 250, 252);
+            panel.BackColor = UiTheme.SidebarBackground;
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             return panel;
+        }
+
+        private RoundedLabel CreateEmptyLabel(string text)
+        {
+            RoundedLabel label = new RoundedLabel();
+            label.AutoSize = false;
+            label.Text = text;
+            label.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            label.ForeColor = UiTheme.TextMuted;
+            label.BackColor = Color.FromArgb(233, 241, 249);
+            label.TextAlign = ContentAlignment.TopLeft;
+            label.Padding = new Padding(10, 10, 10, 10);
+            label.Visible = false;
+            label.CornerRadius = 6;
+            return label;
+        }
+
+        private void RefreshEmptyStates()
+        {
+            commandListContent.Visible = commands.Count > 0;
+            commandEmptyLabel.Visible = commands.Count == 0;
+            siteListContent.Visible = sites.Count > 0;
+            siteEmptyLabel.Visible = sites.Count == 0;
+            LayoutEmptyState(commandListPanel, commandEmptyLabel);
+            LayoutEmptyState(siteListPanel, siteEmptyLabel);
+        }
+
+        private void LayoutEmptyState(Control parent, Control label)
+        {
+            if (parent == null || label == null)
+            {
+                return;
+            }
+
+            label.Bounds = new Rectangle(
+                8,
+                8,
+                Math.Max(160, parent.ClientSize.Width - 24),
+                72);
         }
 
         private void PersistAndSyncCommands()
@@ -1370,15 +2022,17 @@ namespace LocalWebTrayShell
         {
             if (status == CommandStatus.Running)
             {
-                badge.BackColor = Color.FromArgb(219, 243, 224);
-                badge.ForeColor = Color.FromArgb(38, 110, 62);
+                badge.BackColor = UiTheme.SuccessBackground;
+                badge.ForeColor = UiTheme.SuccessForeground;
+                badge.Invalidate();
                 return;
             }
 
             if (status == CommandStatus.Error)
             {
-                badge.BackColor = Color.FromArgb(251, 225, 228);
-                badge.ForeColor = Color.FromArgb(148, 33, 48);
+                badge.BackColor = UiTheme.DangerBackground;
+                badge.ForeColor = UiTheme.DangerForeground;
+                badge.Invalidate();
                 return;
             }
 
@@ -1386,21 +2040,85 @@ namespace LocalWebTrayShell
                 status == CommandStatus.Stopping ||
                 status == CommandStatus.WaitingRetry)
             {
-                badge.BackColor = Color.FromArgb(255, 240, 205);
-                badge.ForeColor = Color.FromArgb(145, 95, 15);
+                badge.BackColor = UiTheme.WarningBackground;
+                badge.ForeColor = UiTheme.WarningForeground;
+                badge.Invalidate();
                 return;
             }
 
-            badge.BackColor = Color.FromArgb(234, 239, 244);
-            badge.ForeColor = Color.FromArgb(79, 89, 100);
+            badge.BackColor = UiTheme.BadgeNeutralBackground;
+            badge.ForeColor = UiTheme.BadgeNeutralForeground;
+            badge.Invalidate();
         }
 
         private void OnResize(object sender, EventArgs e)
         {
-            if (WindowState == FormWindowState.Minimized)
+            if (maximizeButton != null)
             {
-                HideToTray();
+                maximizeButton.Maximized = WindowState == FormWindowState.Maximized;
             }
+        }
+
+        private void OnTitleBarResize(object sender, EventArgs e)
+        {
+            LayoutTitleBarControls();
+        }
+
+        private void LayoutTitleBarControls()
+        {
+            const int windowButtonWidth = 50;
+            int right = Math.Max(0, titleBarPanel.ClientSize.Width);
+            int labelRight;
+
+            closeButton.SetBounds(right - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
+            maximizeButton.SetBounds(closeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
+            minimizeButton.SetBounds(maximizeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
+            titleSidebarButton.SetBounds(10, 6, 36, 32);
+
+            labelRight = Math.Max(58, minimizeButton.Left - 8);
+            titleBarLabel.SetBounds(58, 0, Math.Max(0, labelRight - 58), TitleBarHeight);
+        }
+
+        private void OnTitleBarMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            ReleaseCapture();
+            SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+        }
+
+        private void OnTitleBarMouseDoubleClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ToggleWindowMaximized();
+            }
+        }
+
+        private void OnTitleMinimizeClicked(object sender, EventArgs e)
+        {
+            WindowState = FormWindowState.Minimized;
+        }
+
+        private void OnTitleMaximizeClicked(object sender, EventArgs e)
+        {
+            ToggleWindowMaximized();
+        }
+
+        private void OnTitleCloseClicked(object sender, EventArgs e)
+        {
+            QueueHideToTray();
+        }
+
+        private void ToggleWindowMaximized()
+        {
+            WindowState = WindowState == FormWindowState.Maximized
+                ? FormWindowState.Normal
+                : FormWindowState.Maximized;
+            maximizeButton.Maximized = WindowState == FormWindowState.Maximized;
         }
 
         private void OnTrayStartupMenuClicked(object sender, EventArgs e)
@@ -1414,9 +2132,9 @@ namespace LocalWebTrayShell
             {
                 WindowsStartupManager.SetEnabled(trayStartupMenuItem.Checked);
                 UpdateStatusSummary();
-                statusLabel.Text = trayStartupMenuItem.Checked
+                SetTransientStatus(trayStartupMenuItem.Checked
                     ? "\u5df2\u5f00\u542f\u5f00\u673a\u81ea\u542f\u3002"
-                    : "\u5df2\u5173\u95ed\u5f00\u673a\u81ea\u542f\u3002";
+                    : "\u5df2\u5173\u95ed\u5f00\u673a\u81ea\u542f\u3002");
             }
             catch (Exception ex)
             {
@@ -1434,7 +2152,7 @@ namespace LocalWebTrayShell
         private void OnStopAllCommandsClicked(object sender, EventArgs e)
         {
             commandManager.StopAll();
-            statusLabel.Text = "\u6b63\u5728\u505c\u6b62\u6240\u6709\u547d\u4ee4...";
+            SetTransientStatus("\u6b63\u5728\u505c\u6b62\u6240\u6709\u547d\u4ee4...");
         }
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
@@ -1446,17 +2164,56 @@ namespace LocalWebTrayShell
             {
                 notifyIcon.Visible = false;
                 uiRefreshTimer.Stop();
+                trayRestoreTimer.Stop();
                 commandManager.Dispose();
                 return;
             }
 
             e.Cancel = true;
-            HideToTray();
+            QueueHideToTray();
+        }
+
+        private void QueueHideToTray()
+        {
+            if (hidingToTray || !IsHandleCreated)
+            {
+                return;
+            }
+
+            hidingToTray = true;
+            BeginInvoke(new Action(
+                delegate
+                {
+                    try
+                    {
+                        HideToTray();
+                    }
+                    finally
+                    {
+                        hidingToTray = false;
+                    }
+                }));
         }
 
         private void HideToTray()
         {
-            Hide();
+            if (parkedInTray)
+            {
+                return;
+            }
+
+            restoringFromTray = false;
+            trayRestoreTimer.Stop();
+            preTrayWindowState = WindowState;
+            preTrayBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+            if (preTrayBounds.Width <= 0 || preTrayBounds.Height <= 0)
+            {
+                preTrayBounds = Bounds;
+            }
+
+            parkedInTray = true;
+            WindowState = FormWindowState.Normal;
+            Bounds = GetTrayParkingBounds(preTrayBounds.Size);
             ShowInTaskbar = false;
 
             if (trayHintShown)
@@ -1473,10 +2230,70 @@ namespace LocalWebTrayShell
 
         private void RestoreFromTray()
         {
-            Show();
+            hidingToTray = false;
+            if (parkedInTray)
+            {
+                if (restoringFromTray)
+                {
+                    return;
+                }
+
+                restoringFromTray = true;
+                ShowInTaskbar = true;
+                trayRestoreTimer.Stop();
+                trayRestoreTimer.Start();
+                return;
+            }
+
+            if (!Visible)
+            {
+                Show();
+            }
+
             ShowInTaskbar = true;
-            WindowState = FormWindowState.Normal;
+            WindowState = preTrayWindowState == FormWindowState.Minimized
+                ? FormWindowState.Normal
+                : preTrayWindowState;
             Activate();
+        }
+
+        private void OnTrayRestoreTimerTick(object sender, EventArgs e)
+        {
+            trayRestoreTimer.Stop();
+            FinishRestoreFromTray();
+        }
+
+        private void FinishRestoreFromTray()
+        {
+            if (parkedInTray)
+            {
+                Bounds = preTrayBounds;
+                parkedInTray = false;
+            }
+
+            if (!Visible)
+            {
+                Show();
+            }
+
+            ShowInTaskbar = true;
+            WindowState = preTrayWindowState == FormWindowState.Minimized
+                ? FormWindowState.Normal
+                : preTrayWindowState;
+            restoringFromTray = false;
+            Activate();
+        }
+
+        private Rectangle GetTrayParkingBounds(Size size)
+        {
+            int width = Math.Max(MinimumSize.Width, size.Width);
+            int height = Math.Max(MinimumSize.Height, size.Height);
+
+            return new Rectangle(
+                SystemInformation.VirtualScreen.Left - width - 80,
+                SystemInformation.VirtualScreen.Top - height - 80,
+                width,
+                height);
         }
 
         private void ExitApplication()
@@ -1559,61 +2376,39 @@ namespace LocalWebTrayShell
             target.AutoRetry = source.AutoRetry;
         }
 
-        private Button CreatePrimaryButton(string text, int x, int y, int width)
+        private ThemedButton CreatePrimaryButton(string text, int x, int y, int width)
         {
-            Button button = new Button();
+            ThemedButton button = new ThemedButton();
             button.Text = text;
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 0;
-            button.BackColor = Color.FromArgb(28, 113, 96);
-            button.ForeColor = Color.White;
-            button.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold);
             button.Size = new Size(width, 34);
             button.Location = new Point(x, y);
-            button.Cursor = Cursors.Hand;
+            UiTheme.StylePrimaryButton(button);
             return button;
         }
 
-        private Button CreateSecondaryButton(string text, int x, int y, int width)
+        private ThemedButton CreateSecondaryButton(string text, int x, int y, int width)
         {
-            Button button = new Button();
+            ThemedButton button = new ThemedButton();
             button.Text = text;
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderColor = Color.FromArgb(212, 220, 228);
-            button.FlatAppearance.BorderSize = 1;
-            button.BackColor = Color.FromArgb(249, 251, 252);
-            button.ForeColor = Color.FromArgb(41, 51, 65);
-            button.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular);
             button.Size = new Size(width, 34);
             button.Location = new Point(x, y);
-            button.Cursor = Cursors.Hand;
+            UiTheme.StyleSecondaryButton(button);
             return button;
         }
 
-        private Button CreateViewToggleButton(string text, int columnIndex)
+        private ThemedButton CreateViewToggleButton(string text, int columnIndex)
         {
-            Button button = new Button();
+            ThemedButton button = new ThemedButton();
             button.Text = text;
-            button.FlatStyle = FlatStyle.Flat;
-            button.FlatAppearance.BorderSize = 0;
-            button.Font = new Font("Microsoft YaHei UI", 10f, FontStyle.Bold);
             button.Size = new Size(84, 34);
             button.Location = new Point(columnIndex * 88, 4);
-            button.Cursor = Cursors.Hand;
+            UiTheme.StyleSegmentButton(button);
             return button;
         }
 
-        private void ApplyViewToggleState(Button button, bool active)
+        private void ApplyViewToggleState(ThemedButton button, bool active)
         {
-            if (active)
-            {
-                button.BackColor = Color.FromArgb(28, 113, 96);
-                button.ForeColor = Color.White;
-                return;
-            }
-
-            button.BackColor = Color.FromArgb(239, 244, 242);
-            button.ForeColor = Color.FromArgb(55, 65, 79);
+            UiTheme.SetSegmentButtonState(button, active);
         }
 
         private bool IsNearBottom(TextBox textBox)

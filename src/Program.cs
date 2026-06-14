@@ -1,13 +1,22 @@
 using System;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace LocalWebTrayShell
 {
     internal static class Program
     {
+        [DllImport("shcore.dll")]
+        private static extern int SetProcessDpiAwareness(int value);
+
+        [DllImport("user32.dll")]
+        private static extern bool SetProcessDPIAware();
+
         [STAThread]
         private static int Main(string[] args)
         {
+            EnableDpiAwareness();
+
             if (!EmbeddedDependencyBootstrapper.Initialize(true))
             {
                 return 1;
@@ -33,6 +42,24 @@ namespace LocalWebTrayShell
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
                 return 1;
+            }
+        }
+
+        private static void EnableDpiAwareness()
+        {
+            try
+            {
+                SetProcessDpiAwareness(2);
+            }
+            catch
+            {
+                try
+                {
+                    SetProcessDPIAware();
+                }
+                catch
+                {
+                }
             }
         }
     }

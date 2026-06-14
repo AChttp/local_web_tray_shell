@@ -17,6 +17,7 @@ namespace LocalWebTrayShell
         private Color currentFillColor;
         private Color currentBorderColor;
         private readonly Panel accentBar;
+        private bool updatingFill;
 
         protected SidebarItemCard()
         {
@@ -29,21 +30,21 @@ namespace LocalWebTrayShell
 
             DoubleBuffered = true;
             Cursor = Cursors.Hand;
-            BackColor = Color.White;
-            Margin = new Padding(0, 0, 0, 10);
+            BackColor = UiTheme.Surface;
+            Margin = new Padding(0, 0, 0, 8);
             TabStop = false;
             MinimumSize = new Size(0, 0);
 
             accentBar = new Panel();
             accentBar.Width = 6;
-            accentBar.BackColor = Color.FromArgb(116, 126, 141);
+            accentBar.BackColor = UiTheme.TextMuted;
             Controls.Add(accentBar);
 
-            NormalFillColor = Color.White;
-            NormalBorderColor = Color.FromArgb(231, 236, 241);
-            SelectedFillColor = Color.FromArgb(226, 242, 237);
-            SelectedBorderColor = Color.FromArgb(167, 210, 198);
-            AccentColor = Color.FromArgb(116, 126, 141);
+            NormalFillColor = UiTheme.Surface;
+            NormalBorderColor = UiTheme.Border;
+            SelectedFillColor = Color.FromArgb(221, 239, 247);
+            SelectedBorderColor = Color.FromArgb(90, 166, 194);
+            AccentColor = UiTheme.TextMuted;
 
             AttachInteraction(this);
             AttachInteraction(accentBar);
@@ -183,7 +184,7 @@ namespace LocalWebTrayShell
 
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
 
-            using (GraphicsPath path = CreateRoundedRectanglePath(bounds, 16))
+            using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, 8))
             using (SolidBrush fillBrush = new SolidBrush(currentFillColor))
             using (Pen borderPen = new Pen(currentBorderColor))
             {
@@ -246,22 +247,50 @@ namespace LocalWebTrayShell
             accentBar.BackColor = AccentColor;
             ApplyFillColor(this, currentFillColor);
             accentBar.BackColor = AccentColor;
+            OnVisualStateApplied();
             Invalidate();
+        }
+
+        protected virtual bool ShouldApplyStateFill(Control control)
+        {
+            return true;
+        }
+
+        protected virtual void OnVisualStateApplied()
+        {
         }
 
         private void ApplyFillColor(Control control, Color color)
         {
+            if (updatingFill)
+            {
+                return;
+            }
+
+            updatingFill = true;
+            try
+            {
+                ApplyFillColorRecursive(control, color);
+            }
+            finally
+            {
+                updatingFill = false;
+            }
+        }
+
+        private void ApplyFillColorRecursive(Control control, Color color)
+        {
             foreach (Control child in control.Controls)
             {
-                if (!object.ReferenceEquals(child, accentBar))
+                if (!object.ReferenceEquals(child, accentBar) && ShouldApplyStateFill(child))
                 {
                     child.BackColor = color;
                 }
 
-                ApplyFillColor(child, color);
+                ApplyFillColorRecursive(child, color);
             }
 
-            if (!object.ReferenceEquals(control, accentBar))
+            if (!object.ReferenceEquals(control, accentBar) && ShouldApplyStateFill(control))
             {
                 control.BackColor = color;
             }
@@ -269,22 +298,8 @@ namespace LocalWebTrayShell
 
         private void UpdateAccentBarBounds()
         {
-            accentBar.Location = new Point(12, 12);
-            accentBar.Height = Math.Max(10, Height - 24);
-        }
-
-        protected GraphicsPath CreateRoundedRectanglePath(Rectangle bounds, int radius)
-        {
-            int diameter = Math.Max(2, radius * 2);
-            GraphicsPath path = new GraphicsPath();
-
-            path.AddArc(bounds.X, bounds.Y, diameter, diameter, 180, 90);
-            path.AddArc(bounds.Right - diameter, bounds.Y, diameter, diameter, 270, 90);
-            path.AddArc(bounds.Right - diameter, bounds.Bottom - diameter, diameter, diameter, 0, 90);
-            path.AddArc(bounds.X, bounds.Bottom - diameter, diameter, diameter, 90, 90);
-            path.CloseFigure();
-
-            return path;
+            accentBar.Location = new Point(10, 10);
+            accentBar.Height = Math.Max(10, Height - 20);
         }
 
         protected Color Blend(Color baseColor, Color overlay, float amount)
@@ -303,24 +318,24 @@ namespace LocalWebTrayShell
         private readonly Panel contentPanel;
         private readonly TableLayoutPanel headerTable;
         private readonly Label titleLabel;
-        private readonly Label badgeLabel;
+        private readonly RoundedLabel badgeLabel;
         private readonly Label metaLabel;
         private CommandRuntimeSnapshot snapshot;
         private CommandEntry command;
 
         public CommandSidebarCard()
         {
-            Height = 64;
-            AccentColor = Color.FromArgb(116, 126, 141);
+            Height = 62;
+            AccentColor = UiTheme.TextMuted;
 
             contentPanel = new Panel();
             contentPanel.Dock = DockStyle.Fill;
-            contentPanel.Padding = new Padding(28, 10, 16, 10);
+            contentPanel.Padding = new Padding(26, 9, 14, 9);
             contentPanel.MinimumSize = new Size(0, 0);
 
             headerTable = new TableLayoutPanel();
             headerTable.Dock = DockStyle.Top;
-            headerTable.Height = 24;
+            headerTable.Height = 23;
             headerTable.Margin = new Padding(0);
             headerTable.Padding = new Padding(0);
             headerTable.MinimumSize = new Size(0, 0);
@@ -329,16 +344,15 @@ namespace LocalWebTrayShell
             headerTable.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
             headerTable.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 76f));
 
-            titleLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), Color.FromArgb(26, 37, 49));
+            titleLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold), UiTheme.TextPrimary);
             titleLabel.Dock = DockStyle.Fill;
             titleLabel.MaximumSize = new Size(0, 24);
 
-            badgeLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 8.25f, FontStyle.Bold), Color.FromArgb(116, 126, 141));
+            badgeLabel = UiTheme.CreateBadgeLabel();
             badgeLabel.Dock = DockStyle.Fill;
-            badgeLabel.TextAlign = ContentAlignment.MiddleCenter;
             badgeLabel.Margin = new Padding(6, 0, 0, 0);
 
-            metaLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular), Color.FromArgb(104, 114, 128));
+            metaLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 8.4f, FontStyle.Regular), UiTheme.TextMuted);
             metaLabel.Dock = DockStyle.Top;
             metaLabel.Height = 18;
             metaLabel.Margin = new Padding(0, 6, 0, 0);
@@ -393,8 +407,24 @@ namespace LocalWebTrayShell
 
         private void ApplyBadgeStyle(CommandStatus status)
         {
+            if (badgeLabel == null)
+            {
+                return;
+            }
+
             badgeLabel.ForeColor = GetStatusAccent(status);
             badgeLabel.BackColor = GetStatusBadgeBackground(status);
+            badgeLabel.Invalidate();
+        }
+
+        protected override bool ShouldApplyStateFill(Control control)
+        {
+            return !object.ReferenceEquals(control, badgeLabel);
+        }
+
+        protected override void OnVisualStateApplied()
+        {
+            ApplyBadgeStyle(snapshot == null ? CommandStatus.Stopped : snapshot.Status);
         }
 
         private Label CreateTextLabel(Font font, Color foreColor)
@@ -413,44 +443,44 @@ namespace LocalWebTrayShell
         {
             if (status == CommandStatus.Running)
             {
-                return Color.FromArgb(39, 135, 77);
+                return UiTheme.SuccessForeground;
             }
 
             if (status == CommandStatus.Error)
             {
-                return Color.FromArgb(179, 54, 73);
+                return UiTheme.DangerForeground;
             }
 
             if (status == CommandStatus.Starting ||
                 status == CommandStatus.Stopping ||
                 status == CommandStatus.WaitingRetry)
             {
-                return Color.FromArgb(189, 123, 18);
+                return UiTheme.WarningForeground;
             }
 
-            return Color.FromArgb(116, 126, 141);
+            return UiTheme.BadgeNeutralForeground;
         }
 
         private Color GetStatusBadgeBackground(CommandStatus status)
         {
             if (status == CommandStatus.Running)
             {
-                return Color.FromArgb(228, 245, 233);
+                return UiTheme.SuccessBackground;
             }
 
             if (status == CommandStatus.Error)
             {
-                return Color.FromArgb(252, 234, 236);
+                return UiTheme.DangerBackground;
             }
 
             if (status == CommandStatus.Starting ||
                 status == CommandStatus.Stopping ||
                 status == CommandStatus.WaitingRetry)
             {
-                return Color.FromArgb(255, 244, 217);
+                return UiTheme.WarningBackground;
             }
 
-            return Color.FromArgb(238, 242, 246);
+            return UiTheme.BadgeNeutralBackground;
         }
 
         private string SummarizeCommand(string value)
@@ -475,22 +505,22 @@ namespace LocalWebTrayShell
 
         public SiteSidebarCard()
         {
-            Height = 60;
-            AccentColor = Color.FromArgb(214, 143, 51);
-            SelectedFillColor = Color.FromArgb(245, 239, 226);
-            SelectedBorderColor = Color.FromArgb(228, 202, 161);
+            Height = 58;
+            AccentColor = Color.FromArgb(207, 137, 42);
+            SelectedFillColor = Color.FromArgb(255, 239, 214);
+            SelectedBorderColor = Color.FromArgb(224, 166, 75);
 
             contentPanel = new Panel();
             contentPanel.Dock = DockStyle.Fill;
-            contentPanel.Padding = new Padding(28, 10, 16, 9);
+            contentPanel.Padding = new Padding(26, 9, 14, 8);
             contentPanel.MinimumSize = new Size(0, 0);
 
-            titleLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 9.5f, FontStyle.Bold), Color.FromArgb(26, 37, 49));
+            titleLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold), UiTheme.TextPrimary);
             titleLabel.Dock = DockStyle.Top;
             titleLabel.Height = 20;
             titleLabel.MaximumSize = new Size(0, 20);
 
-            urlLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 8.5f, FontStyle.Regular), Color.FromArgb(104, 114, 128));
+            urlLabel = CreateTextLabel(new Font("Microsoft YaHei UI", 8.4f, FontStyle.Regular), UiTheme.TextMuted);
             urlLabel.Dock = DockStyle.Top;
             urlLabel.Height = 18;
             urlLabel.Margin = new Padding(0, 5, 0, 0);
