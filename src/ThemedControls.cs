@@ -303,4 +303,193 @@ namespace LocalWebTrayShell
             }
         }
     }
+
+    internal enum TitleBarButtonKind
+    {
+        Sidebar,
+        Minimize,
+        Maximize,
+        Close
+    }
+
+    internal sealed class TitleBarIconButton : Control
+    {
+        private readonly TitleBarButtonKind kind;
+        private bool hover;
+        private bool pressed;
+        private bool sidebarCollapsed;
+        private bool maximized;
+
+        public TitleBarIconButton(TitleBarButtonKind kind)
+        {
+            this.kind = kind;
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = UiTheme.WindowBackground;
+            Cursor = Cursors.Hand;
+        }
+
+        public bool SidebarCollapsed
+        {
+            get { return sidebarCollapsed; }
+            set
+            {
+                if (sidebarCollapsed == value)
+                {
+                    return;
+                }
+
+                sidebarCollapsed = value;
+                Invalidate();
+            }
+        }
+
+        public bool Maximized
+        {
+            get { return maximized; }
+            set
+            {
+                if (maximized == value)
+                {
+                    return;
+                }
+
+                maximized = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            hover = false;
+            pressed = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnMouseDown(MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                pressed = true;
+                Invalidate();
+            }
+
+            base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            pressed = false;
+            Invalidate();
+            base.OnMouseUp(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Color background = GetBackgroundColor();
+            Color icon = kind == TitleBarButtonKind.Close && hover
+                ? Color.White
+                : hover || pressed ? UiTheme.TextPrimary : UiTheme.TextSecondary;
+
+            e.Graphics.Clear(background);
+            e.Graphics.SmoothingMode = SmoothingMode.None;
+
+            using (Pen pen = new Pen(icon, 1.5f))
+            using (SolidBrush brush = new SolidBrush(icon))
+            {
+                if (kind == TitleBarButtonKind.Sidebar)
+                {
+                    DrawSidebarIcon(e.Graphics, pen, brush);
+                }
+                else if (kind == TitleBarButtonKind.Minimize)
+                {
+                    DrawMinimizeIcon(e.Graphics, pen);
+                }
+                else if (kind == TitleBarButtonKind.Maximize)
+                {
+                    DrawMaximizeIcon(e.Graphics, pen);
+                }
+                else
+                {
+                    DrawCloseIcon(e.Graphics, pen);
+                }
+            }
+        }
+
+        private Color GetBackgroundColor()
+        {
+            if (kind == TitleBarButtonKind.Close && (hover || pressed))
+            {
+                return pressed ? Color.FromArgb(184, 35, 35) : Color.FromArgb(196, 43, 28);
+            }
+
+            if (pressed)
+            {
+                return UiTheme.SecondaryPressed;
+            }
+
+            return hover ? UiTheme.SecondaryHover : UiTheme.WindowBackground;
+        }
+
+        private void DrawSidebarIcon(Graphics graphics, Pen pen, SolidBrush brush)
+        {
+            Rectangle iconRect = new Rectangle((Width - 18) / 2, (Height - 18) / 2, 18, 18);
+
+            graphics.DrawRectangle(pen, iconRect);
+            graphics.DrawLine(pen, iconRect.Left + 5, iconRect.Top, iconRect.Left + 5, iconRect.Bottom);
+
+            if (sidebarCollapsed)
+            {
+                graphics.FillRectangle(brush, iconRect.Left + 8, iconRect.Top + 4, 5, 2);
+                graphics.FillRectangle(brush, iconRect.Left + 8, iconRect.Top + 8, 5, 2);
+                graphics.FillRectangle(brush, iconRect.Left + 8, iconRect.Top + 12, 5, 2);
+            }
+            else
+            {
+                graphics.FillRectangle(brush, iconRect.Left + 2, iconRect.Top + 2, 2, iconRect.Height - 4);
+            }
+        }
+
+        private void DrawMinimizeIcon(Graphics graphics, Pen pen)
+        {
+            int y = Height / 2 + 5;
+            graphics.DrawLine(pen, Width / 2 - 6, y, Width / 2 + 6, y);
+        }
+
+        private void DrawMaximizeIcon(Graphics graphics, Pen pen)
+        {
+            int x = Width / 2 - 6;
+            int y = Height / 2 - 6;
+
+            if (maximized)
+            {
+                graphics.DrawRectangle(pen, x + 3, y, 10, 9);
+                graphics.DrawRectangle(pen, x, y + 4, 10, 9);
+                return;
+            }
+
+            graphics.DrawRectangle(pen, x, y, 12, 12);
+        }
+
+        private void DrawCloseIcon(Graphics graphics, Pen pen)
+        {
+            int left = Width / 2 - 6;
+            int top = Height / 2 - 6;
+
+            graphics.DrawLine(pen, left, top, left + 12, top + 12);
+            graphics.DrawLine(pen, left + 12, top, left, top + 12);
+        }
+    }
 }

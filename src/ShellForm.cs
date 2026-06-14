@@ -19,14 +19,37 @@ namespace LocalWebTrayShell
         private const int SidebarResizeIntervalMs = 16;
         private const int WM_SYSCOMMAND = 0x0112;
         private const int SC_CLOSE = 0xF060;
+        private const int WM_NCHITTEST = 0x0084;
+        private const int WM_NCLBUTTONDOWN = 0x00A1;
+        private const int HTCLIENT = 1;
+        private const int HTCAPTION = 2;
+        private const int HTLEFT = 10;
+        private const int HTRIGHT = 11;
+        private const int HTTOP = 12;
+        private const int HTTOPLEFT = 13;
+        private const int HTTOPRIGHT = 14;
+        private const int HTBOTTOM = 15;
+        private const int HTBOTTOMLEFT = 16;
+        private const int HTBOTTOMRIGHT = 17;
+        private const int TitleBarHeight = 44;
+        private const int ResizeGripSize = 8;
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll")]
+        private static extern bool ReleaseCapture();
 
         private readonly NotifyIcon notifyIcon;
         private readonly ContextMenuStrip trayMenu;
         private readonly StatusStrip statusStrip;
         private readonly ToolStripStatusLabel statusLabel;
+        private readonly Panel titleBarPanel;
+        private readonly TitleBarIconButton titleSidebarButton;
+        private readonly Label titleBarLabel;
+        private readonly TitleBarIconButton minimizeButton;
+        private readonly TitleBarIconButton maximizeButton;
+        private readonly TitleBarIconButton closeButton;
         private readonly Panel rootPanel;
         private readonly Panel leftSidebar;
         private readonly Panel sidebarContentPanel;
@@ -123,11 +146,12 @@ namespace LocalWebTrayShell
 
             workspaceMode = WorkspaceMode.Web;
 
-            Text = AppName;
+            SetWindowTitle(AppName);
             Width = 1540;
             Height = 930;
             MinimumSize = new Size(1240, 760);
             StartPosition = FormStartPosition.CenterScreen;
+            FormBorderStyle = FormBorderStyle.None;
             AutoScaleMode = AutoScaleMode.Dpi;
             Icon = appIcon;
             BackColor = UiTheme.WindowBackground;
@@ -137,6 +161,47 @@ namespace LocalWebTrayShell
             statusLabel = new ToolStripStatusLabel("\u6b63\u5728\u52a0\u8f7d\u5de5\u4f5c\u53f0...");
             statusStrip = new StatusStrip();
             statusStrip.Items.Add(statusLabel);
+
+            titleBarPanel = new Panel();
+            titleBarPanel.Dock = DockStyle.Top;
+            titleBarPanel.Height = TitleBarHeight;
+            titleBarPanel.BackColor = UiTheme.WindowBackground;
+            titleBarPanel.MouseDown += OnTitleBarMouseDown;
+            titleBarPanel.MouseDoubleClick += OnTitleBarMouseDoubleClick;
+            titleBarPanel.Resize += OnTitleBarResize;
+
+            titleSidebarButton = new TitleBarIconButton(TitleBarButtonKind.Sidebar);
+            titleSidebarButton.Location = new Point(10, 6);
+            titleSidebarButton.SidebarCollapsed = sidebarHidden;
+            titleSidebarButton.Click += OnSidebarToggleClicked;
+
+            titleBarLabel = new Label();
+            titleBarLabel.AutoSize = false;
+            titleBarLabel.TextAlign = ContentAlignment.MiddleLeft;
+            titleBarLabel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            titleBarLabel.ForeColor = UiTheme.TextSecondary;
+            titleBarLabel.BackColor = UiTheme.WindowBackground;
+            titleBarLabel.MouseDown += OnTitleBarMouseDown;
+            titleBarLabel.MouseDoubleClick += OnTitleBarMouseDoubleClick;
+
+            minimizeButton = new TitleBarIconButton(TitleBarButtonKind.Minimize);
+            minimizeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            minimizeButton.Click += OnTitleMinimizeClicked;
+
+            maximizeButton = new TitleBarIconButton(TitleBarButtonKind.Maximize);
+            maximizeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            maximizeButton.Click += OnTitleMaximizeClicked;
+
+            closeButton = new TitleBarIconButton(TitleBarButtonKind.Close);
+            closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
+            closeButton.Click += OnTitleCloseClicked;
+
+            titleBarPanel.Controls.Add(titleSidebarButton);
+            titleBarPanel.Controls.Add(titleBarLabel);
+            titleBarPanel.Controls.Add(minimizeButton);
+            titleBarPanel.Controls.Add(maximizeButton);
+            titleBarPanel.Controls.Add(closeButton);
+            LayoutTitleBarControls();
 
             rootPanel = new Panel();
             rootPanel.Dock = DockStyle.Fill;
@@ -570,6 +635,7 @@ namespace LocalWebTrayShell
 
             Controls.Add(rootPanel);
             Controls.Add(statusStrip);
+            Controls.Add(titleBarPanel);
 
             trayMenu = new ContextMenuStrip();
             trayMenu.Items.Add("\u6253\u5f00\u4e3b\u754c\u9762", null, delegate { RestoreFromTray(); });
@@ -660,7 +726,93 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            if (m.Msg == WM_NCHITTEST)
+            {
+                HandleWindowHitTest(ref m);
+                return;
+            }
+
             base.WndProc(ref m);
+        }
+
+        private void HandleWindowHitTest(ref Message m)
+        {
+            Point clientPoint = PointToClient(new Point(
+                unchecked((short)((long)m.LParam & 0xFFFF)),
+                unchecked((short)(((long)m.LParam >> 16) & 0xFFFF))));
+            bool left = clientPoint.X <= ResizeGripSize;
+            bool right = clientPoint.X >= ClientSize.Width - ResizeGripSize;
+            bool top = clientPoint.Y <= ResizeGripSize;
+            bool bottom = clientPoint.Y >= ClientSize.Height - ResizeGripSize;
+
+            if (left && top)
+            {
+                m.Result = new IntPtr(HTTOPLEFT);
+                return;
+            }
+
+            if (right && top)
+            {
+                m.Result = new IntPtr(HTTOPRIGHT);
+                return;
+            }
+
+            if (left && bottom)
+            {
+                m.Result = new IntPtr(HTBOTTOMLEFT);
+                return;
+            }
+
+            if (right && bottom)
+            {
+                m.Result = new IntPtr(HTBOTTOMRIGHT);
+                return;
+            }
+
+            if (left)
+            {
+                m.Result = new IntPtr(HTLEFT);
+                return;
+            }
+
+            if (right)
+            {
+                m.Result = new IntPtr(HTRIGHT);
+                return;
+            }
+
+            if (top)
+            {
+                m.Result = new IntPtr(HTTOP);
+                return;
+            }
+
+            if (bottom)
+            {
+                m.Result = new IntPtr(HTBOTTOM);
+                return;
+            }
+
+            if (clientPoint.Y >= 0 &&
+                clientPoint.Y < TitleBarHeight &&
+                !IsPointOverTitleBarControl(clientPoint))
+            {
+                m.Result = new IntPtr(HTCAPTION);
+                return;
+            }
+
+            m.Result = new IntPtr(HTCLIENT);
+        }
+
+        private bool IsPointOverTitleBarControl(Point clientPoint)
+        {
+            Point titlePoint = titleBarPanel.PointToClient(PointToScreen(clientPoint));
+            Control child = titleBarPanel.GetChildAtPoint(titlePoint);
+
+            return child == titleSidebarButton ||
+                child == minimizeButton ||
+                child == maximizeButton ||
+                child == closeButton;
         }
 
         private void OnUiRefreshTimerTick(object sender, EventArgs e)
@@ -1387,9 +1539,9 @@ namespace LocalWebTrayShell
             logsPanel.Visible = mode == WorkspaceMode.Logs;
             ApplyViewToggleState(webViewModeButton, mode == WorkspaceMode.Web);
             ApplyViewToggleState(logsViewModeButton, mode == WorkspaceMode.Logs);
-            Text = mode == WorkspaceMode.Web
+            SetWindowTitle(mode == WorkspaceMode.Web
                 ? currentSite == null ? AppName : AppName + " - " + currentSite.Name
-                : currentCommand == null ? AppName : AppName + " - " + currentCommand.Name;
+                : currentCommand == null ? AppName : AppName + " - " + currentCommand.Name);
 
             if (mode == WorkspaceMode.Web && currentSite != null)
             {
@@ -1398,6 +1550,18 @@ namespace LocalWebTrayShell
             else if (mode == WorkspaceMode.Logs)
             {
                 RefreshLogsView();
+            }
+        }
+
+        private void SetWindowTitle(string title)
+        {
+            string displayTitle = title ?? AppName;
+
+            Text = displayTitle;
+
+            if (titleBarLabel != null)
+            {
+                titleBarLabel.Text = displayTitle;
             }
         }
 
@@ -1464,6 +1628,19 @@ namespace LocalWebTrayShell
             SnapSidebarWidth();
         }
 
+        private void OnSidebarToggleClicked(object sender, EventArgs e)
+        {
+            if (sidebarHidden)
+            {
+                SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth);
+                SetTransientStatus("\u5de6\u4fa7\u9762\u677f\u5df2\u5c55\u5f00\u3002", 2);
+                return;
+            }
+
+            SetSidebarWidth(0);
+            SetTransientStatus("\u5de6\u4fa7\u9762\u677f\u5df2\u6298\u53e0\u3002", 2);
+        }
+
         private void OnSidebarResizeTimerTick(object sender, EventArgs e)
         {
             if (!resizingSidebar)
@@ -1509,6 +1686,7 @@ namespace LocalWebTrayShell
                 sidebarHidden = true;
                 leftSidebar.Visible = false;
                 sidebarSplitter.Collapsed = true;
+                titleSidebarButton.SidebarCollapsed = true;
                 LayoutShellPanels(!resizingSidebar);
                 return;
             }
@@ -1527,6 +1705,7 @@ namespace LocalWebTrayShell
             expandedSidebarWidth = width;
             leftSidebar.Visible = true;
             sidebarSplitter.Collapsed = false;
+            titleSidebarButton.SidebarCollapsed = false;
             LayoutShellPanels(!resizingSidebar);
         }
 
@@ -1874,10 +2053,77 @@ namespace LocalWebTrayShell
 
         private void OnResize(object sender, EventArgs e)
         {
+            if (maximizeButton != null)
+            {
+                maximizeButton.Maximized = WindowState == FormWindowState.Maximized;
+            }
+
             if (WindowState == FormWindowState.Minimized)
             {
                 QueueHideToTray();
             }
+        }
+
+        private void OnTitleBarResize(object sender, EventArgs e)
+        {
+            LayoutTitleBarControls();
+        }
+
+        private void LayoutTitleBarControls()
+        {
+            const int windowButtonWidth = 50;
+            int right = Math.Max(0, titleBarPanel.ClientSize.Width);
+            int labelRight;
+
+            closeButton.SetBounds(right - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
+            maximizeButton.SetBounds(closeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
+            minimizeButton.SetBounds(maximizeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
+            titleSidebarButton.SetBounds(10, 6, 36, 32);
+
+            labelRight = Math.Max(58, minimizeButton.Left - 8);
+            titleBarLabel.SetBounds(58, 0, Math.Max(0, labelRight - 58), TitleBarHeight);
+        }
+
+        private void OnTitleBarMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            ReleaseCapture();
+            SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+        }
+
+        private void OnTitleBarMouseDoubleClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                ToggleWindowMaximized();
+            }
+        }
+
+        private void OnTitleMinimizeClicked(object sender, EventArgs e)
+        {
+            WindowState = FormWindowState.Minimized;
+        }
+
+        private void OnTitleMaximizeClicked(object sender, EventArgs e)
+        {
+            ToggleWindowMaximized();
+        }
+
+        private void OnTitleCloseClicked(object sender, EventArgs e)
+        {
+            QueueHideToTray();
+        }
+
+        private void ToggleWindowMaximized()
+        {
+            WindowState = WindowState == FormWindowState.Maximized
+                ? FormWindowState.Normal
+                : FormWindowState.Maximized;
+            maximizeButton.Maximized = WindowState == FormWindowState.Maximized;
         }
 
         private void OnTrayStartupMenuClicked(object sender, EventArgs e)
