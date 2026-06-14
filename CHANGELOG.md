@@ -2,6 +2,29 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.1 - 2026-06-15
+
+Maintenance release focused on sidebar responsiveness and log rendering performance.
+
+### Changed
+
+- Reworked sidebar resizing so the left control surface and right workspace resize together during drag.
+- Replaced the old multi-control sidebar rendering path with a single owner-drawn sidebar surface.
+- Removed obsolete sidebar list/card controls that were no longer visible after the owner-drawn sidebar migration.
+- Batched command runtime UI refreshes to reduce cross-thread UI work during high-frequency command output.
+- Made log rendering append new lines incrementally when possible instead of rewriting the whole log text box.
+- Increased the maximum sidebar width to support wider left panels and smaller embedded web views.
+
+### Fixed
+
+- Reduced flicker and broken intermediate layout states while resizing the sidebar.
+- Improved behavior when command logs update rapidly while the logs view is open.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.1-win-x64.zip`
+
 ## v1.0.0 - 2026-06-13
 
 First public open source release.
