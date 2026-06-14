@@ -2,6 +2,54 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-06-15 - v1.0.1 Sidebar and Log Performance Release
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.1`
+2. Updated release documentation:
+   - `README.md`
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.1.md`
+3. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+4. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+5. Release preparation commit:
+   - Commit: `98d3000`
+   - Message: `Prepare v1.0.1 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.1`
+2. Pushed the tag to GitHub:
+   - `origin v1.0.1`
+
+### GitHub Release Publication
+
+1. Created GitHub Release for tag:
+   - `v1.0.1`
+2. Release URL:
+   - `https://github.com/AChttp/local_web_tray_shell/releases/tag/v1.0.1`
+3. Uploaded release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.1-win-x64.zip`
+
+### Release Artifact Hashes
+
+- `Switch.exe`
+  - SHA256: `C576C0B5B537CA6D628A8E2E8A3DD312A7806DD91C27C846977CA38FC3765B12`
+- `Switch-v1.0.1-win-x64.zip`
+  - SHA256: `1877669632F4A37D620788B762A9ADEA4E2F8D1BFA374A3DEE67417E6BE21229`
+
+### Notes
+
+- This release includes the sidebar owner-draw cleanup, real-time sidebar/workspace drag resizing improvements, and throttled command log UI refresh.
+- GitHub CLI was not available on the machine, so the GitHub Release was created through the GitHub REST API using the existing Git credential helper configuration.
+
 ## 2026-06-13 - v1.0.0 First Public Release
 
 ### Repository Bootstrap
