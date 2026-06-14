@@ -91,6 +91,7 @@ namespace LocalWebTrayShell
         private bool lastLogAutoScrollEnabled;
         private bool sidebarHidden;
         private bool resizingSidebar;
+        private bool hidingToTray;
         private int sidebarDragStartX;
         private int sidebarDragStartWidth;
         private int sidebarPendingWidth;
@@ -1849,7 +1850,7 @@ namespace LocalWebTrayShell
         {
             if (WindowState == FormWindowState.Minimized)
             {
-                HideToTray();
+                QueueHideToTray();
             }
         }
 
@@ -1901,11 +1902,38 @@ namespace LocalWebTrayShell
             }
 
             e.Cancel = true;
-            HideToTray();
+            QueueHideToTray();
+        }
+
+        private void QueueHideToTray()
+        {
+            if (hidingToTray || !IsHandleCreated)
+            {
+                return;
+            }
+
+            hidingToTray = true;
+            BeginInvoke(new Action(
+                delegate
+                {
+                    try
+                    {
+                        HideToTray();
+                    }
+                    finally
+                    {
+                        hidingToTray = false;
+                    }
+                }));
         }
 
         private void HideToTray()
         {
+            if (!Visible && !ShowInTaskbar)
+            {
+                return;
+            }
+
             Hide();
             ShowInTaskbar = false;
 
@@ -1923,6 +1951,7 @@ namespace LocalWebTrayShell
 
         private void RestoreFromTray()
         {
+            hidingToTray = false;
             Show();
             ShowInTaskbar = true;
             WindowState = FormWindowState.Normal;
