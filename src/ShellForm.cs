@@ -2057,11 +2057,6 @@ namespace LocalWebTrayShell
             {
                 maximizeButton.Maximized = WindowState == FormWindowState.Maximized;
             }
-
-            if (WindowState == FormWindowState.Minimized)
-            {
-                QueueHideToTray();
-            }
         }
 
         private void OnTitleBarResize(object sender, EventArgs e)

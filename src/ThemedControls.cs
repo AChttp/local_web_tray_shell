@@ -227,6 +227,42 @@ namespace LocalWebTrayShell
         }
     }
 
+    internal sealed class RoundedPanel : Panel
+    {
+        public RoundedPanel()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            CornerRadius = 8;
+            BorderColor = UiTheme.BorderSoft;
+        }
+
+        public int CornerRadius { get; set; }
+
+        public Color BorderColor { get; set; }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            Rectangle bounds = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
+
+            e.Graphics.Clear(Parent == null ? UiTheme.WindowBackground : Parent.BackColor);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+
+            using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, CornerRadius))
+            using (SolidBrush fillBrush = new SolidBrush(BackColor))
+            using (Pen borderPen = new Pen(BorderColor))
+            {
+                e.Graphics.FillPath(fillBrush, path);
+                e.Graphics.DrawPath(borderPen, path);
+            }
+        }
+    }
+
     internal sealed class SidebarSplitterPanel : Panel
     {
         private bool hover;
