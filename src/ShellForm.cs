@@ -36,6 +36,9 @@ namespace LocalWebTrayShell
         private const int HTBOTTOMRIGHT = 17;
         private const int TitleBarHeight = 44;
         private const int ResizeGripSize = 8;
+        private const int WS_SYSMENU = 0x00080000;
+        private const int WS_MINIMIZEBOX = 0x00020000;
+        private const int WS_MAXIMIZEBOX = 0x00010000;
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -413,6 +416,16 @@ namespace LocalWebTrayShell
             RefreshCommandButtons();
             RefreshSiteButtons();
             UpdateStatusSummary();
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                CreateParams createParams = base.CreateParams;
+                createParams.Style |= WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+                return createParams;
+            }
         }
 
         private async void OnShown(object sender, EventArgs e)
