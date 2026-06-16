@@ -2,6 +2,54 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-06-16 - v1.0.2 Web Navigation Release
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.2`
+2. Updated release documentation:
+   - `README.md`
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.2.md`
+3. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+4. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+5. Release preparation commit:
+   - Commit: `ca5bbfd`
+   - Message: `Prepare v1.0.2 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.2`
+2. Pushed the tag to GitHub:
+   - `origin v1.0.2`
+
+### GitHub Release Publication
+
+1. Created GitHub Release for tag:
+   - `v1.0.2`
+2. Release URL:
+   - `https://github.com/AChttp/local_web_tray_shell/releases/tag/v1.0.2`
+3. Uploaded release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.2-win-x64.zip`
+
+### Release Artifact Hashes
+
+- `Switch.exe`
+  - SHA256: `D90F8DE8C3D97345C7CCA943C3591C88F51AC3CEC85516B1EA26C7924AC65693`
+- `Switch-v1.0.2-win-x64.zip`
+  - SHA256: `80954245E94E554028702A106DEFAF7DDE8D407B9606EFEE8B37C61A66E1C1DE`
+
+### Notes
+
+- This release includes taskbar minimize behavior for the borderless window and embedded WebView navigation improvements.
+- GitHub CLI was not available on the machine, so the GitHub Release was created through the GitHub REST API using the existing Git credential helper configuration and the local proxy.
+
 ## 2026-06-15 - v1.0.1 Sidebar and Log Performance Release
 
 ### Versioning and Release Preparation
