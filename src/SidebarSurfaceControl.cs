@@ -73,6 +73,7 @@ namespace LocalWebTrayShell
         private const int SectionPaddingTop = 14;
         private const int SectionTitleHeight = 24;
         private const int ActionHeight = 40;
+        private const int SiteActionsHeight = 84;
         private const int CommandItemHeight = 62;
         private const int SiteItemHeight = 58;
         private const int ItemSpacing = 8;
@@ -121,6 +122,8 @@ namespace LocalWebTrayShell
         }
 
         public event EventHandler StopAllCommandsClicked;
+        public event EventHandler BackSiteClicked;
+        public event EventHandler HomeSiteClicked;
         public event EventHandler ReloadSiteClicked;
         public event EventHandler<SidebarWorkspaceModeEventArgs> WorkspaceModeRequested;
         public event EventHandler<SidebarListItemEventArgs<CommandEntry>> CommandActivated;
@@ -151,6 +154,10 @@ namespace LocalWebTrayShell
         public bool DeleteSiteEnabled { get; set; }
 
         public bool OpenSiteEnabled { get; set; }
+
+        public bool BackSiteEnabled { get; set; }
+
+        public bool HomeSiteEnabled { get; set; }
 
         public bool ReloadSiteEnabled { get; set; }
 
@@ -322,17 +329,19 @@ namespace LocalWebTrayShell
             Rectangle stop = new Rectangle(inner.Right - stopWidth, inner.Y + 2, stopWidth, 34);
             Rectangle summary = new Rectangle(inner.X, inner.Y + 52, inner.Width, 34);
             Rectangle actionRow = new Rectangle(inner.X, inner.Y + 90, inner.Width, 34);
-            int firstWidth = Math.Max(0, (actionRow.Width * 30) / 100);
-            int secondWidth = Math.Max(0, (actionRow.Width * 30) / 100);
-            int thirdWidth = Math.Max(0, actionRow.Width - firstWidth - secondWidth);
+            int gap = actionRow.Width < 260 ? 8 : 10;
+            int buttonWidth = Math.Max(0, (actionRow.Width - (gap * 2)) / 3);
+            int x = actionRow.X;
 
             TextRenderer.DrawText(graphics, "Switch \u63a7\u5236\u53f0", appTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
             DrawButton(graphics, stop, "\u5168\u90e8\u505c\u6b62", false, true, "stop-all");
             TextRenderer.DrawText(graphics, SummaryText ?? string.Empty, summaryFont, summary, UiTheme.TextSecondary, TextFlags(ContentAlignment.TopLeft) | TextFormatFlags.EndEllipsis);
 
-            DrawSegmentButton(graphics, new Rectangle(actionRow.X, actionRow.Y, Math.Max(0, firstWidth - 8), actionRow.Height), "\u7f51\u9875", WorkspaceMode == WorkspaceMode.Web, "mode-web");
-            DrawSegmentButton(graphics, new Rectangle(actionRow.X + firstWidth, actionRow.Y, Math.Max(0, secondWidth - 8), actionRow.Height), "\u65e5\u5fd7", WorkspaceMode == WorkspaceMode.Logs, "mode-logs");
-            DrawButton(graphics, new Rectangle(actionRow.X + firstWidth + secondWidth, actionRow.Y, thirdWidth, actionRow.Height), "\u5237\u65b0\u9875\u9762", false, ReloadSiteEnabled, "reload-site");
+            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u7f51\u9875", WorkspaceMode == WorkspaceMode.Web, "mode-web");
+            x += buttonWidth + gap;
+            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u65e5\u5fd7", WorkspaceMode == WorkspaceMode.Logs, "mode-logs");
+            x += buttonWidth + gap;
+            DrawButton(graphics, new Rectangle(x, actionRow.Y, Math.Max(0, actionRow.Right - x), actionRow.Height), "\u5237\u65b0", false, ReloadSiteEnabled, "reload-site");
         }
 
         private void DrawCommandSection(Graphics graphics, Rectangle section)
@@ -355,18 +364,25 @@ namespace LocalWebTrayShell
         private void DrawSiteSection(Graphics graphics, Rectangle section)
         {
             Rectangle title = new Rectangle(section.X, section.Y + SectionPaddingTop, section.Width, SectionTitleHeight);
-            Rectangle actions = new Rectangle(section.X, Math.Max(title.Bottom, section.Bottom - ActionHeight), section.Width, ActionHeight);
+            Rectangle actions = new Rectangle(section.X, Math.Max(title.Bottom, section.Bottom - SiteActionsHeight), section.Width, SiteActionsHeight);
+            Rectangle siteActions = new Rectangle(actions.X, actions.Y, actions.Width, ActionHeight);
+            Rectangle navigationActions = new Rectangle(actions.X, siteActions.Bottom + 4, actions.Width, Math.Max(0, actions.Bottom - siteActions.Bottom - 4));
 
             siteListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
             TextRenderer.DrawText(graphics, "\u7ad9\u70b9", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
             DrawSiteList(graphics, siteListRect);
             DrawFourButtons(
                 graphics,
-                actions,
+                siteActions,
                 new ButtonSpec("\u65b0\u589e", true, true, "site-add"),
                 new ButtonSpec("\u7f16\u8f91", false, EditSiteEnabled, "site-edit"),
                 new ButtonSpec("\u5220\u9664", false, DeleteSiteEnabled, "site-delete"),
                 new ButtonSpec("\u6253\u5f00", false, OpenSiteEnabled, "site-open"));
+            DrawTwoButtons(
+                graphics,
+                navigationActions,
+                new ButtonSpec("\u8fd4\u56de", false, BackSiteEnabled, "back-site"),
+                new ButtonSpec("\u4e3b\u9875", false, HomeSiteEnabled, "home-site"));
         }
 
         private void DrawCommandList(Graphics graphics, Rectangle bounds)
@@ -483,6 +499,20 @@ namespace LocalWebTrayShell
             DrawButton(graphics, new Rectangle(x, y, Math.Max(0, bounds.Right - x), buttonHeight), fourth.Text, fourth.Primary, fourth.Enabled, fourth.Key);
         }
 
+        private void DrawTwoButtons(Graphics graphics, Rectangle bounds, ButtonSpec first, ButtonSpec second)
+        {
+            int gap = bounds.Width < 260 ? 8 : 12;
+            int buttonHeight = Math.Min(34, bounds.Height);
+            int y = bounds.Y + Math.Max(0, (bounds.Height - buttonHeight) / 2);
+            int available = Math.Max(0, bounds.Width - gap);
+            int buttonWidth = available / 2;
+            int x = bounds.X;
+
+            DrawButton(graphics, new Rectangle(x, y, buttonWidth, buttonHeight), first.Text, first.Primary, first.Enabled, first.Key);
+            x += buttonWidth + gap;
+            DrawButton(graphics, new Rectangle(x, y, Math.Max(0, bounds.Right - x), buttonHeight), second.Text, second.Primary, second.Enabled, second.Key);
+        }
+
         private void DrawSegmentButton(Graphics graphics, Rectangle bounds, string text, bool active, string key)
         {
             bool hover = string.Equals(hoverKey, key, StringComparison.OrdinalIgnoreCase);
@@ -578,6 +608,18 @@ namespace LocalWebTrayShell
             if (key == "stop-all")
             {
                 Raise(StopAllCommandsClicked);
+                return;
+            }
+
+            if (key == "back-site")
+            {
+                Raise(BackSiteClicked);
+                return;
+            }
+
+            if (key == "home-site")
+            {
+                Raise(HomeSiteClicked);
                 return;
             }
 

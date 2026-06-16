@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.2 - 2026-06-16
+
+Maintenance release focused on embedded web navigation and desktop window behavior.
+
+### Added
+
+- Added site-level web navigation actions for returning to the previous page and returning to the configured home URL.
+- Added lightweight navigation history fallback for embedded WebView pages when WebView2 history state is not immediately available.
+
+### Changed
+
+- Links that request a new window now open inside the current embedded WebView instead of spawning a separate window.
+- Moved web navigation actions into the site section so they are grouped with the selected site.
+
+### Fixed
+
+- Fixed borderless window taskbar behavior so clicking the taskbar icon can minimize the foreground window.
+- Fixed failed navigation messages so they show the actual target URL instead of the configured site home URL.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.2-win-x64.zip`
+
 ## v1.0.1 - 2026-06-15
 
 Maintenance release focused on sidebar responsiveness and log rendering performance.

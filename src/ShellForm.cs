@@ -207,6 +207,8 @@ namespace LocalWebTrayShell
                 return commandManager.GetSnapshot(commandId);
             };
             sidebarSurface.StopAllCommandsClicked += OnStopAllCommandsClicked;
+            sidebarSurface.BackSiteClicked += OnBackSiteClicked;
+            sidebarSurface.HomeSiteClicked += OnHomeSiteClicked;
             sidebarSurface.ReloadSiteClicked += OnReloadSiteClicked;
             sidebarSurface.WorkspaceModeRequested += OnSidebarWorkspaceModeRequested;
             sidebarSurface.CommandActivated += OnCommandListItemActivated;
@@ -922,6 +924,7 @@ namespace LocalWebTrayShell
                 await state.WebView.EnsureCoreWebView2Async(webViewEnvironment);
                 state.WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
                 state.WebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
+                state.WebView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
                 state.IsInitialized = true;
                 state.LastNavigatedUrl = site.Url;
                 state.WebView.CoreWebView2.Navigate(site.Url);
@@ -952,6 +955,7 @@ namespace LocalWebTrayShell
 
             state = new SiteViewState();
             state.Site = site;
+            state.NavigationHistory = new List<string>();
             state.WebView = new WebView2();
             state.WebView.Dock = DockStyle.Fill;
             state.WebView.Visible = false;
@@ -969,6 +973,11 @@ namespace LocalWebTrayShell
         {
             SiteViewState state = GetSiteState(sender);
 
+            if (state != null)
+            {
+                state.CurrentNavigationUrl = e.Uri;
+            }
+
             if (state != null && currentSite != null &&
                 string.Equals(state.Site.Id, currentSite.Id, StringComparison.OrdinalIgnoreCase))
             {
@@ -977,9 +986,33 @@ namespace LocalWebTrayShell
             }
         }
 
+        private void OnNewWindowRequested(object sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            CoreWebView2 webView = sender as CoreWebView2;
+            SiteViewState state = FindSiteState(webView);
+
+            e.Handled = true;
+
+            if (state == null || string.IsNullOrWhiteSpace(e.Uri))
+            {
+                return;
+            }
+
+            webView.Navigate(e.Uri);
+
+            if (currentSite != null &&
+                string.Equals(state.Site.Id, currentSite.Id, StringComparison.OrdinalIgnoreCase))
+            {
+                SetWorkspaceMode(WorkspaceMode.Web);
+                SetTransientStatus("\u6b63\u5728\u5f53\u524d\u9875\u6253\u5f00\u94fe\u63a5...");
+                RefreshSiteButtons();
+            }
+        }
+
         private void OnNavigationCompleted(object sender, CoreWebView2NavigationCompletedEventArgs e)
         {
             SiteViewState state = GetSiteState(sender);
+            string navigationUrl;
 
             if (state == null || currentSite == null ||
                 !string.Equals(state.Site.Id, currentSite.Id, StringComparison.OrdinalIgnoreCase))
@@ -987,13 +1020,64 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            navigationUrl = string.IsNullOrWhiteSpace(state.CurrentNavigationUrl)
+                ? state.Site.Url
+                : state.CurrentNavigationUrl;
+
+            if (e.IsSuccess)
+            {
+                RecordSiteNavigation(state, navigationUrl);
+            }
+            else
+            {
+                state.SuppressNextHistoryEntry = false;
+            }
+
             SetTransientStatus(e.IsSuccess
                 ? "\u5df2\u52a0\u8f7d " + state.Site.Name
-                : "\u65e0\u6cd5\u8bbf\u95ee " + state.Site.Url);
+                : "\u65e0\u6cd5\u8bbf\u95ee " + navigationUrl);
             SetWebState(
-                e.IsSuccess ? string.Empty : "\u65e0\u6cd5\u8bbf\u95ee " + state.Site.Name,
-                e.IsSuccess ? string.Empty : state.Site.Url,
+                e.IsSuccess ? string.Empty : "\u65e0\u6cd5\u8bbf\u95ee\u9875\u9762",
+                e.IsSuccess ? string.Empty : navigationUrl,
                 !e.IsSuccess);
+            RefreshSiteButtons();
+        }
+
+        private void RecordSiteNavigation(SiteViewState state, string url)
+        {
+            string lastUrl;
+
+            if (state == null || string.IsNullOrWhiteSpace(url))
+            {
+                return;
+            }
+
+            if (state.NavigationHistory == null)
+            {
+                state.NavigationHistory = new List<string>();
+            }
+
+            if (state.SuppressNextHistoryEntry)
+            {
+                state.SuppressNextHistoryEntry = false;
+                return;
+            }
+
+            if (state.NavigationHistory.Count > 0)
+            {
+                lastUrl = state.NavigationHistory[state.NavigationHistory.Count - 1];
+                if (string.Equals(lastUrl, url, StringComparison.OrdinalIgnoreCase))
+                {
+                    return;
+                }
+            }
+
+            state.NavigationHistory.Add(url);
+
+            if (state.NavigationHistory.Count > 64)
+            {
+                state.NavigationHistory.RemoveAt(0);
+            }
         }
 
         private SiteViewState GetSiteState(object sender)
@@ -1006,6 +1090,26 @@ namespace LocalWebTrayShell
             }
 
             return webView.Tag as SiteViewState;
+        }
+
+        private SiteViewState FindSiteState(CoreWebView2 coreWebView)
+        {
+            if (coreWebView == null)
+            {
+                return null;
+            }
+
+            foreach (SiteViewState state in siteViews.Values)
+            {
+                if (state != null &&
+                    state.WebView != null &&
+                    state.WebView.CoreWebView2 == coreWebView)
+                {
+                    return state;
+                }
+            }
+
+            return null;
         }
 
         private void SetWebState(string title, string detail, bool canRetry)
@@ -1248,6 +1352,10 @@ namespace LocalWebTrayShell
             if (siteViews.TryGetValue(selectedSite.Id, out viewState))
             {
                 webViewHost.Controls.Remove(viewState.WebView);
+                if (viewState.WebView.CoreWebView2 != null)
+                {
+                    viewState.WebView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+                }
                 viewState.WebView.Dispose();
                 siteViews.Remove(selectedSite.Id);
             }
@@ -1279,6 +1387,111 @@ namespace LocalWebTrayShell
         private void OnReloadSiteClicked(object sender, EventArgs e)
         {
             ReloadCurrentSite();
+        }
+
+        private void OnBackSiteClicked(object sender, EventArgs e)
+        {
+            GoBackCurrentSite();
+        }
+
+        private void OnHomeSiteClicked(object sender, EventArgs e)
+        {
+            NavigateCurrentSiteHome();
+        }
+
+        private void GoBackCurrentSite()
+        {
+            SiteViewState state;
+            string previousUrl;
+
+            if (currentSite == null)
+            {
+                SetTransientStatus("\u5f53\u524d\u672a\u9009\u62e9\u7ad9\u70b9\u3002");
+                return;
+            }
+
+            if (siteViews.TryGetValue(currentSite.Id, out state) &&
+                state.IsInitialized &&
+                state.WebView.CoreWebView2 != null)
+            {
+                SetWorkspaceMode(WorkspaceMode.Web);
+
+                if (state.WebView.CoreWebView2.CanGoBack)
+                {
+                    PopCurrentSiteHistory(state);
+                    state.WebView.CoreWebView2.GoBack();
+                    SetTransientStatus("\u6b63\u5728\u8fd4\u56de\u4e0a\u4e00\u9875...");
+                    RefreshSiteButtons();
+                    return;
+                }
+
+                if (TryGetPreviousSiteUrl(state, out previousUrl))
+                {
+                    PopCurrentSiteHistory(state);
+                    state.SuppressNextHistoryEntry = true;
+                    state.WebView.CoreWebView2.Navigate(previousUrl);
+                    SetTransientStatus("\u6b63\u5728\u8fd4\u56de\u4e0a\u4e00\u9875...");
+                    SetWebState("\u6b63\u5728\u8fd4\u56de\u4e0a\u4e00\u9875", previousUrl, false);
+                    RefreshSiteButtons();
+                    return;
+                }
+            }
+
+            SetTransientStatus("\u5f53\u524d\u9875\u9762\u6ca1\u6709\u53ef\u8fd4\u56de\u7684\u5386\u53f2\u3002");
+        }
+
+        private void NavigateCurrentSiteHome()
+        {
+            SiteViewState state;
+
+            if (currentSite == null)
+            {
+                SetTransientStatus("\u5f53\u524d\u672a\u9009\u62e9\u7ad9\u70b9\u3002");
+                return;
+            }
+
+            if (siteViews.TryGetValue(currentSite.Id, out state) &&
+                state.IsInitialized &&
+                state.WebView.CoreWebView2 != null)
+            {
+                SetWorkspaceMode(WorkspaceMode.Web);
+                state.LastNavigatedUrl = currentSite.Url;
+                state.WebView.CoreWebView2.Navigate(currentSite.Url);
+                SetTransientStatus("\u6b63\u5728\u56de\u5230 " + currentSite.Name + " \u4e3b\u9875...");
+                SetWebState("\u6b63\u5728\u6253\u5f00 " + currentSite.Name, currentSite.Url, false);
+                RefreshSiteButtons();
+                return;
+            }
+
+            ShowSite(currentSite);
+        }
+
+        private static bool TryGetPreviousSiteUrl(SiteViewState state, out string previousUrl)
+        {
+            previousUrl = null;
+
+            if (state == null ||
+                state.NavigationHistory == null ||
+                state.NavigationHistory.Count < 2)
+            {
+                return false;
+            }
+
+            previousUrl = state.NavigationHistory[state.NavigationHistory.Count - 2];
+            return !string.IsNullOrWhiteSpace(previousUrl);
+        }
+
+        private static void PopCurrentSiteHistory(SiteViewState state)
+        {
+            if (state == null ||
+                state.NavigationHistory == null ||
+                state.NavigationHistory.Count < 2)
+            {
+                return;
+            }
+
+            state.NavigationHistory.RemoveAt(state.NavigationHistory.Count - 1);
+            state.SuppressNextHistoryEntry = true;
         }
 
         private void ReloadCurrentSite()
@@ -1395,8 +1608,22 @@ namespace LocalWebTrayShell
             sidebarSurface.EditSiteEnabled = hasSite;
             sidebarSurface.DeleteSiteEnabled = hasSite && sites.Count > 1;
             sidebarSurface.OpenSiteEnabled = hasSite;
+            sidebarSurface.BackSiteEnabled = CanCurrentSiteGoBack();
+            sidebarSurface.HomeSiteEnabled = hasSite;
             sidebarSurface.ReloadSiteEnabled = hasSite;
             sidebarSurface.Invalidate();
+        }
+
+        private bool CanCurrentSiteGoBack()
+        {
+            SiteViewState state;
+
+            return currentSite != null &&
+                siteViews.TryGetValue(currentSite.Id, out state) &&
+                state.IsInitialized &&
+                state.WebView.CoreWebView2 != null &&
+                (state.WebView.CoreWebView2.CanGoBack ||
+                 (state.NavigationHistory != null && state.NavigationHistory.Count > 1));
         }
 
         private void RefreshLogsView()
@@ -2355,6 +2582,12 @@ namespace LocalWebTrayShell
             public bool InitializationStarted { get; set; }
 
             public string LastNavigatedUrl { get; set; }
+
+            public string CurrentNavigationUrl { get; set; }
+
+            public List<string> NavigationHistory { get; set; }
+
+            public bool SuppressNextHistoryEntry { get; set; }
         }
     }
 }
