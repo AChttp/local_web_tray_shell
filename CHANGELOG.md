@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.3 - 2026-06-17
+
+Maintenance release focused on title bar window behavior.
+
+### Fixed
+
+- Fixed the custom title bar double-click behavior so the window can switch from normal mode to maximized mode and back consistently.
+- Preserved title bar dragging by starting the system move operation only after the pointer crosses the drag threshold.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.3-win-x64.zip`
+
 ## v1.0.2 - 2026-06-16
 
 Maintenance release focused on embedded web navigation and desktop window behavior.

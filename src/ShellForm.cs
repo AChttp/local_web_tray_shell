@@ -101,11 +101,14 @@ namespace LocalWebTrayShell
         private bool hidingToTray;
         private bool parkedInTray;
         private bool restoringFromTray;
+        private bool titleBarDragPending;
         private int sidebarDragStartX;
         private int sidebarDragStartWidth;
         private int sidebarPendingWidth;
         private DateTime statusSummaryHoldUntilUtc;
+        private DateTime lastTitleBarDoubleClickHandledUtc;
         private int expandedSidebarWidth;
+        private Point titleBarDragStartScreen;
         private Rectangle preTrayBounds;
         private FormWindowState preTrayWindowState;
         private string renderedLogCommandId;
@@ -150,6 +153,8 @@ namespace LocalWebTrayShell
             titleBarPanel.Height = TitleBarHeight;
             titleBarPanel.BackColor = UiTheme.WindowBackground;
             titleBarPanel.MouseDown += OnTitleBarMouseDown;
+            titleBarPanel.MouseMove += OnTitleBarMouseMove;
+            titleBarPanel.MouseUp += OnTitleBarMouseUp;
             titleBarPanel.MouseDoubleClick += OnTitleBarMouseDoubleClick;
             titleBarPanel.Resize += OnTitleBarResize;
 
@@ -165,6 +170,8 @@ namespace LocalWebTrayShell
             titleBarLabel.ForeColor = UiTheme.TextSecondary;
             titleBarLabel.BackColor = UiTheme.WindowBackground;
             titleBarLabel.MouseDown += OnTitleBarMouseDown;
+            titleBarLabel.MouseMove += OnTitleBarMouseMove;
+            titleBarLabel.MouseUp += OnTitleBarMouseUp;
             titleBarLabel.MouseDoubleClick += OnTitleBarMouseDoubleClick;
 
             minimizeButton = new TitleBarIconButton(TitleBarButtonKind.Minimize);
@@ -2223,16 +2230,83 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            if (e.Clicks > 1)
+            {
+                titleBarDragPending = false;
+                HandleTitleBarDoubleClick();
+                return;
+            }
+
+            titleBarDragPending = true;
+            titleBarDragStartScreen = GetTitleBarMouseScreenPoint(sender, e.Location);
+        }
+
+        private void OnTitleBarMouseMove(object sender, MouseEventArgs e)
+        {
+            Point currentScreen;
+            Size dragSize;
+            Rectangle dragBounds;
+
+            if (!titleBarDragPending || e.Button != MouseButtons.Left)
+            {
+                return;
+            }
+
+            currentScreen = GetTitleBarMouseScreenPoint(sender, e.Location);
+            dragSize = SystemInformation.DragSize;
+            dragBounds = new Rectangle(
+                titleBarDragStartScreen.X - (dragSize.Width / 2),
+                titleBarDragStartScreen.Y - (dragSize.Height / 2),
+                Math.Max(1, dragSize.Width),
+                Math.Max(1, dragSize.Height));
+
+            if (dragBounds.Contains(currentScreen))
+            {
+                return;
+            }
+
+            titleBarDragPending = false;
             ReleaseCapture();
             SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+        }
+
+        private void OnTitleBarMouseUp(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left)
+            {
+                titleBarDragPending = false;
+            }
         }
 
         private void OnTitleBarMouseDoubleClick(object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
             {
-                ToggleWindowMaximized();
+                HandleTitleBarDoubleClick();
             }
+        }
+
+        private Point GetTitleBarMouseScreenPoint(object sender, Point location)
+        {
+            Control control = sender as Control;
+
+            return control == null
+                ? PointToScreen(location)
+                : control.PointToScreen(location);
+        }
+
+        private void HandleTitleBarDoubleClick()
+        {
+            DateTime now = DateTime.UtcNow;
+
+            if ((now - lastTitleBarDoubleClickHandledUtc).TotalMilliseconds <= SystemInformation.DoubleClickTime)
+            {
+                return;
+            }
+
+            lastTitleBarDoubleClickHandledUtc = now;
+            titleBarDragPending = false;
+            ToggleWindowMaximized();
         }
 
         private void OnTitleMinimizeClicked(object sender, EventArgs e)
