@@ -2,6 +2,54 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-06-17 - v1.0.3 Title Bar Double-Click Release
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.3`
+2. Updated release documentation:
+   - `README.md`
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.3.md`
+3. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+4. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+5. Release preparation commit:
+   - Commit: `d62d460`
+   - Message: `Prepare v1.0.3 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.3`
+2. Pushed the tag to GitHub:
+   - `origin v1.0.3`
+
+### GitHub Release Publication
+
+1. Created GitHub Release for tag:
+   - `v1.0.3`
+2. Release URL:
+   - `https://github.com/AChttp/local_web_tray_shell/releases/tag/v1.0.3`
+3. Uploaded release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.3-win-x64.zip`
+
+### Release Artifact Hashes
+
+- `Switch.exe`
+  - SHA256: `02C5E010CD1F95252F15C77914C1418E68E9598CA8377C3A36DE7F6C0802896E`
+- `Switch-v1.0.3-win-x64.zip`
+  - SHA256: `9E7C736F09B4E91AEAB61C41E908541965EA7EC8F5A3ED058006EC0C83D8B5DE`
+
+### Notes
+
+- This release fixes custom title bar double-click behavior while preserving title bar dragging.
+- GitHub CLI was not available on the machine, so the GitHub Release was created through the GitHub REST API using the existing Git credential helper configuration and the local proxy.
+
 ## 2026-06-16 - v1.0.2 Web Navigation Release
 
 ### Versioning and Release Preparation
