@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 namespace LocalWebTrayShell
@@ -450,6 +451,9 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            int commandMaxScroll = Math.Max(0, GetListContentHeight(commands.Count, CommandItemHeight) - bounds.Height);
+            commandScrollY = Math.Max(0, Math.Min(commandMaxScroll, commandScrollY));
+
             DrawClipped(graphics, bounds, delegate
             {
                 int stride = CommandItemHeight + ItemSpacing;
@@ -475,6 +479,9 @@ namespace LocalWebTrayShell
                 DrawEmpty(graphics, bounds, "\u6682\u65e0\u7ad9\u70b9\uff0c\u8bf7\u5148\u65b0\u589e\u8981\u67e5\u770b\u7684\u672c\u5730\u7f51\u9875\u3002", "site-add");
                 return;
             }
+
+            int siteMaxScroll = Math.Max(0, GetListContentHeight(sites.Count, SiteItemHeight) - bounds.Height);
+            siteScrollY = Math.Max(0, Math.Min(siteMaxScroll, siteScrollY));
 
             DrawClipped(graphics, bounds, delegate
             {
@@ -631,17 +638,40 @@ namespace LocalWebTrayShell
             }
         }
 
+        [DllImport("gdi32.dll")]
+        private static extern IntPtr SelectClipRgn(IntPtr hdc, IntPtr hrgn);
+
+        [DllImport("gdi32.dll")]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool DeleteObject(IntPtr hObject);
+
         private void DrawClipped(Graphics graphics, Rectangle bounds, Action draw)
         {
             Region oldClip = graphics.Clip;
+            graphics.SetClip(bounds);
+
+            // TextRenderer.DrawText renders through GDI, which ignores the GDI+ clip set
+            // above. Mirror the same clip onto the device context so partially-scrolled
+            // items cannot bleed text past the list edge (e.g. into the section header).
+            IntPtr clipRegion = graphics.Clip.GetHrgn(graphics);
+            IntPtr hdc = graphics.GetHdc();
+            SelectClipRgn(hdc, clipRegion);
+            graphics.ReleaseHdc(hdc);
 
             try
             {
-                graphics.SetClip(bounds);
                 draw();
             }
             finally
             {
+                hdc = graphics.GetHdc();
+                SelectClipRgn(hdc, IntPtr.Zero);
+                graphics.ReleaseHdc(hdc);
+
+                if (clipRegion != IntPtr.Zero)
+                {
+                    DeleteObject(clipRegion);
+                }
                 graphics.Clip = oldClip;
             }
         }
