@@ -77,7 +77,6 @@ namespace LocalWebTrayShell
         private readonly Panel webViewHost;
         private readonly Timer uiRefreshTimer;
         private readonly Timer runtimeRefreshTimer;
-        private readonly Timer trayRestoreTimer;
         private readonly ToolStripMenuItem trayStartupMenuItem;
         private readonly object runtimeRefreshSync;
         private readonly HashSet<string> pendingRuntimeRefreshCommandIds;
@@ -99,8 +98,6 @@ namespace LocalWebTrayShell
         private bool sidebarHidden;
         private bool resizingSidebar;
         private bool hidingToTray;
-        private bool parkedInTray;
-        private bool restoringFromTray;
         private bool titleBarDragPending;
         private int sidebarDragStartX;
         private int sidebarDragStartWidth;
@@ -109,7 +106,6 @@ namespace LocalWebTrayShell
         private DateTime lastTitleBarDoubleClickHandledUtc;
         private int expandedSidebarWidth;
         private Point titleBarDragStartScreen;
-        private Rectangle preTrayBounds;
         private FormWindowState preTrayWindowState;
         private string renderedLogCommandId;
         private int renderedLogFirstSequence;
@@ -141,7 +137,6 @@ namespace LocalWebTrayShell
             AutoScaleMode = AutoScaleMode.Dpi;
             Icon = appIcon;
             BackColor = UiTheme.WindowBackground;
-            preTrayBounds = Bounds;
             preTrayWindowState = WindowState;
 
             statusLabel = new ToolStripStatusLabel("\u6b63\u5728\u52a0\u8f7d\u5de5\u4f5c\u53f0...");
@@ -228,10 +223,6 @@ namespace LocalWebTrayShell
             sidebarSplitter.MouseDown += OnSidebarSplitterMouseDown;
             sidebarSplitter.MouseMove += OnSidebarSplitterMouseMove;
             sidebarSplitter.MouseUp += OnSidebarSplitterMouseUp;
-
-            trayRestoreTimer = new Timer();
-            trayRestoreTimer.Interval = 60;
-            trayRestoreTimer.Tick += OnTrayRestoreTimerTick;
 
             leftSidebar.Controls.Add(sidebarSurface);
 
@@ -2376,7 +2367,6 @@ namespace LocalWebTrayShell
                 notifyIcon.Visible = false;
                 uiRefreshTimer.Stop();
                 runtimeRefreshTimer.Stop();
-                trayRestoreTimer.Stop();
                 commandManager.Dispose();
                 return;
             }
@@ -2409,24 +2399,19 @@ namespace LocalWebTrayShell
 
         private void HideToTray()
         {
-            if (parkedInTray)
+            if (!Visible)
             {
                 return;
             }
 
-            restoringFromTray = false;
-            trayRestoreTimer.Stop();
-            preTrayWindowState = WindowState;
-            preTrayBounds = WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
-            if (preTrayBounds.Width <= 0 || preTrayBounds.Height <= 0)
-            {
-                preTrayBounds = Bounds;
-            }
-
-            parkedInTray = true;
-            WindowState = FormWindowState.Normal;
-            Bounds = GetTrayParkingBounds(preTrayBounds.Size);
-            ShowInTaskbar = false;
+            // A hidden top-level window has no taskbar button, so we hide via
+            // Visible instead of toggling ShowInTaskbar. Toggling ShowInTaskbar
+            // recreates the window handle, which stalls the UI for ~1-2s while a
+            // live WebView2 re-attaches -- that was the restore delay.
+            preTrayWindowState = WindowState == FormWindowState.Minimized
+                ? FormWindowState.Normal
+                : WindowState;
+            Hide();
 
             if (trayHintShown)
             {
@@ -2443,69 +2428,15 @@ namespace LocalWebTrayShell
         private void RestoreFromTray()
         {
             hidingToTray = false;
-            if (parkedInTray)
+            if (!Visible)
             {
-                if (restoringFromTray)
+                if (WindowState == FormWindowState.Minimized)
                 {
-                    return;
+                    WindowState = preTrayWindowState;
                 }
-
-                restoringFromTray = true;
-                ShowInTaskbar = true;
-                trayRestoreTimer.Stop();
-                trayRestoreTimer.Start();
-                return;
-            }
-
-            if (!Visible)
-            {
                 Show();
             }
-
-            ShowInTaskbar = true;
-            WindowState = preTrayWindowState == FormWindowState.Minimized
-                ? FormWindowState.Normal
-                : preTrayWindowState;
             Activate();
-        }
-
-        private void OnTrayRestoreTimerTick(object sender, EventArgs e)
-        {
-            trayRestoreTimer.Stop();
-            FinishRestoreFromTray();
-        }
-
-        private void FinishRestoreFromTray()
-        {
-            if (parkedInTray)
-            {
-                Bounds = preTrayBounds;
-                parkedInTray = false;
-            }
-
-            if (!Visible)
-            {
-                Show();
-            }
-
-            ShowInTaskbar = true;
-            WindowState = preTrayWindowState == FormWindowState.Minimized
-                ? FormWindowState.Normal
-                : preTrayWindowState;
-            restoringFromTray = false;
-            Activate();
-        }
-
-        private Rectangle GetTrayParkingBounds(Size size)
-        {
-            int width = Math.Max(MinimumSize.Width, size.Width);
-            int height = Math.Max(MinimumSize.Height, size.Height);
-
-            return new Rectangle(
-                SystemInformation.VirtualScreen.Left - width - 80,
-                SystemInformation.VirtualScreen.Top - height - 80,
-                width,
-                height);
         }
 
         private void ExitApplication()
