@@ -2282,8 +2282,45 @@ namespace LocalWebTrayShell
             }
 
             titleBarDragPending = false;
+
+            if (WindowState == FormWindowState.Maximized)
+            {
+                RestoreMaximizedForDrag(titleBarDragStartScreen);
+            }
+
             ReleaseCapture();
             SendMessage(Handle, WM_NCLBUTTONDOWN, new IntPtr(HTCAPTION), IntPtr.Zero);
+        }
+
+        // Dragging a maximized borderless window does nothing on its own -- the system
+        // will not move a maximized window. Restore it first and reposition it under the
+        // cursor (keeping the same horizontal grip point) so the drag continues smoothly,
+        // matching how standard Windows chrome behaves.
+        private void RestoreMaximizedForDrag(Point dragStartScreen)
+        {
+            Size restoreSize = RestoreBounds.Size;
+
+            if (restoreSize.Width <= 0 || restoreSize.Height <= 0)
+            {
+                Rectangle workingArea = Screen.FromPoint(Cursor.Position).WorkingArea;
+                restoreSize = new Size(
+                    Math.Min(workingArea.Width - 80, 1280),
+                    Math.Min(workingArea.Height - 80, 820));
+            }
+
+            Rectangle maxBounds = Bounds;
+            float ratio = maxBounds.Width > 0
+                ? (float)(dragStartScreen.X - maxBounds.Left) / maxBounds.Width
+                : 0.5f;
+            ratio = Math.Max(0f, Math.Min(1f, ratio));
+
+            Point cursor = Cursor.Position;
+            int newX = cursor.X - (int)(restoreSize.Width * ratio);
+            int newY = cursor.Y - (TitleBarHeight / 2);
+
+            WindowState = FormWindowState.Normal;
+            Bounds = new Rectangle(newX, newY, restoreSize.Width, restoreSize.Height);
+            maximizeButton.Maximized = false;
         }
 
         private void OnTitleBarMouseUp(object sender, MouseEventArgs e)
