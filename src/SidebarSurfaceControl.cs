@@ -62,6 +62,19 @@ namespace LocalWebTrayShell
         public WorkspaceMode Mode { get; private set; }
     }
 
+    internal sealed class SidebarReorderEventArgs : EventArgs
+    {
+        public SidebarReorderEventArgs(int index, int delta)
+        {
+            Index = index;
+            Delta = delta;
+        }
+
+        public int Index { get; private set; }
+
+        public int Delta { get; private set; }
+    }
+
     internal sealed class SidebarSurfaceControl : Control
     {
         private const int OuterLeft = 16;
@@ -71,7 +84,8 @@ namespace LocalWebTrayShell
         private const int BrandHeight = 164;
         private const int CommandSectionHeight = 332;
         private const int SectionPaddingTop = 14;
-        private const int SectionTitleHeight = 24;
+        private const int SectionTitleHeight = 30;
+        private const int ReorderColumnWidth = 28;
         private const int ActionHeight = 40;
         private const int SiteActionsHeight = 84;
         private const int CommandItemHeight = 62;
@@ -130,6 +144,8 @@ namespace LocalWebTrayShell
         public event EventHandler<SidebarListItemEventArgs<SiteEntry>> SiteActivated;
         public event EventHandler<SidebarCommandActionEventArgs> CommandActionRequested;
         public event EventHandler<SidebarSiteActionEventArgs> SiteActionRequested;
+        public event EventHandler<SidebarReorderEventArgs> CommandReorderRequested;
+        public event EventHandler<SidebarReorderEventArgs> SiteReorderRequested;
 
         public Func<string, CommandRuntimeSnapshot> SnapshotProvider { get; set; }
 
@@ -197,6 +213,47 @@ namespace LocalWebTrayShell
 
             siteScrollY = Math.Min(siteScrollY, GetMaxSiteScroll());
             Invalidate();
+        }
+
+        public void EnsureCommandVisible(int index)
+        {
+            if (EnsureVisible(index, CommandItemHeight, commandListRect, commands.Count, GetMaxCommandScroll(), ref commandScrollY))
+            {
+                Invalidate();
+            }
+        }
+
+        public void EnsureSiteVisible(int index)
+        {
+            if (EnsureVisible(index, SiteItemHeight, siteListRect, sites.Count, GetMaxSiteScroll(), ref siteScrollY))
+            {
+                Invalidate();
+            }
+        }
+
+        private static bool EnsureVisible(int index, int itemHeight, Rectangle listRect, int count, int maxScroll, ref int scrollY)
+        {
+            if (index < 0 || index >= count || listRect.Height <= 0)
+            {
+                return false;
+            }
+
+            int stride = itemHeight + ItemSpacing;
+            int itemTop = ListTopPadding + index * stride - scrollY;
+
+            if (itemTop < 0)
+            {
+                scrollY = Math.Max(0, scrollY + itemTop);
+                return true;
+            }
+
+            if (itemTop + itemHeight > listRect.Height)
+            {
+                scrollY = Math.Min(maxScroll, scrollY + (itemTop + itemHeight - listRect.Height));
+                return true;
+            }
+
+            return false;
         }
 
         public void RefreshCommand(string commandId)
@@ -350,7 +407,7 @@ namespace LocalWebTrayShell
             Rectangle actions = new Rectangle(section.X, Math.Max(title.Bottom, section.Bottom - ActionHeight), section.Width, ActionHeight);
 
             commandListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
-            TextRenderer.DrawText(graphics, "\u547d\u4ee4", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
+            TextRenderer.DrawText(graphics, "\u547d\u4ee4", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
             DrawCommandList(graphics, commandListRect);
             DrawFourButtons(
                 graphics,
@@ -369,7 +426,7 @@ namespace LocalWebTrayShell
             Rectangle navigationActions = new Rectangle(actions.X, siteActions.Bottom + 4, actions.Width, Math.Max(0, actions.Bottom - siteActions.Bottom - 4));
 
             siteListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
-            TextRenderer.DrawText(graphics, "\u7ad9\u70b9", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
+            TextRenderer.DrawText(graphics, "\u7ad9\u70b9", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
             DrawSiteList(graphics, siteListRect);
             DrawFourButtons(
                 graphics,
@@ -443,12 +500,13 @@ namespace LocalWebTrayShell
             CommandStatus status = snapshot == null ? CommandStatus.Stopped : snapshot.Status;
             Color accent = GetStatusAccent(status);
             bool selected = command != null && string.Equals(command.Id, SelectedCommandId, StringComparison.OrdinalIgnoreCase);
-            bool hover = string.Equals(hoverKey, "cmd:" + index, StringComparison.OrdinalIgnoreCase);
-            Color fill = selected ? Color.FromArgb(221, 239, 247) : hover ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
-            Color border = selected ? Color.FromArgb(90, 166, 194) : hover ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
-            Rectangle badge = new Rectangle(bounds.Right - 90, bounds.Y + 9, 76, 23);
+            bool itemHovered = IsItemHovered("cmd", index);
+            Color fill = selected ? Color.FromArgb(221, 239, 247) : itemHovered ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
+            Color border = selected ? Color.FromArgb(90, 166, 194) : itemHovered ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
+            int contentRight = bounds.Right - ReorderColumnWidth - 4;
+            Rectangle badge = new Rectangle(contentRight - 76, bounds.Y + 9, 76, 23);
             Rectangle title = new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, badge.X - bounds.X - 32), 23);
-            Rectangle meta = new Rectangle(bounds.X + 26, bounds.Y + 38, Math.Max(1, bounds.Width - 40), 18);
+            Rectangle meta = new Rectangle(bounds.X + 26, bounds.Y + 38, Math.Max(1, badge.X - bounds.X - 32), 18);
 
             DrawCard(graphics, bounds, fill, border);
             using (SolidBrush brush = new SolidBrush(accent))
@@ -460,15 +518,16 @@ namespace LocalWebTrayShell
             DrawBadge(graphics, badge, snapshot == null ? "\u5df2\u505c\u6b62" : snapshot.GetDisplayStatus(), GetStatusBadgeBackground(status), accent);
             TextRenderer.DrawText(graphics, GetCommandMeta(command), itemMetaFont, meta, UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
             hitRects["cmd:" + index] = bounds;
+            DrawReorderHandles(graphics, bounds, "cmd", index, commands.Count, selected || itemHovered);
         }
 
         private void DrawSiteItem(Graphics graphics, SiteEntry site, Rectangle bounds, int index)
         {
             Color accent = Color.FromArgb(207, 137, 42);
             bool selected = site != null && string.Equals(site.Id, SelectedSiteId, StringComparison.OrdinalIgnoreCase);
-            bool hover = string.Equals(hoverKey, "site:" + index, StringComparison.OrdinalIgnoreCase);
-            Color fill = selected ? Color.FromArgb(255, 239, 214) : hover ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
-            Color border = selected ? Color.FromArgb(224, 166, 75) : hover ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
+            bool itemHovered = IsItemHovered("site", index);
+            Color fill = selected ? Color.FromArgb(255, 239, 214) : itemHovered ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
+            Color border = selected ? Color.FromArgb(224, 166, 75) : itemHovered ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
 
             DrawCard(graphics, bounds, fill, border);
             using (SolidBrush brush = new SolidBrush(accent))
@@ -476,9 +535,11 @@ namespace LocalWebTrayShell
                 graphics.FillRectangle(brush, bounds.X + 10, bounds.Y + 10, 6, Math.Max(10, bounds.Height - 20));
             }
 
-            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, bounds.Width - 40), 20), UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
-            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, new Rectangle(bounds.X + 26, bounds.Y + 34, Math.Max(1, bounds.Width - 40), 18), UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
+            int siteContentRight = bounds.Right - ReorderColumnWidth - 4;
+            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, siteContentRight - bounds.X - 32), 20), UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
+            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, new Rectangle(bounds.X + 26, bounds.Y + 34, Math.Max(1, siteContentRight - bounds.X - 32), 18), UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
             hitRects["site:" + index] = bounds;
+            DrawReorderHandles(graphics, bounds, "site", index, sites.Count, selected || itemHovered);
         }
 
         private void DrawFourButtons(Graphics graphics, Rectangle bounds, ButtonSpec first, ButtonSpec second, ButtonSpec third, ButtonSpec fourth)
@@ -585,17 +646,99 @@ namespace LocalWebTrayShell
             }
         }
 
+        private bool IsItemHovered(string prefix, int index)
+        {
+            if (string.IsNullOrEmpty(hoverKey))
+            {
+                return false;
+            }
+
+            return string.Equals(hoverKey, prefix + ":" + index, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(hoverKey, prefix + "-up:" + index, StringComparison.OrdinalIgnoreCase) ||
+                   string.Equals(hoverKey, prefix + "-down:" + index, StringComparison.OrdinalIgnoreCase);
+        }
+
+        private void DrawReorderHandles(Graphics graphics, Rectangle bounds, string prefix, int index, int count, bool active)
+        {
+            if (!active || count <= 1)
+            {
+                return;
+            }
+
+            int columnX = bounds.Right - ReorderColumnWidth;
+            int halfHeight = bounds.Height / 2;
+
+            if (index > 0)
+            {
+                Rectangle up = new Rectangle(columnX, bounds.Y, ReorderColumnWidth, halfHeight);
+                bool upHover = string.Equals(hoverKey, prefix + "-up:" + index, StringComparison.OrdinalIgnoreCase);
+                DrawChevron(graphics, up, true, upHover);
+                hitRects[prefix + "-up:" + index] = up;
+            }
+
+            if (index < count - 1)
+            {
+                Rectangle down = new Rectangle(columnX, bounds.Y + halfHeight, ReorderColumnWidth, bounds.Height - halfHeight);
+                bool downHover = string.Equals(hoverKey, prefix + "-down:" + index, StringComparison.OrdinalIgnoreCase);
+                DrawChevron(graphics, down, false, downHover);
+                hitRects[prefix + "-down:" + index] = down;
+            }
+        }
+
+        private void DrawChevron(Graphics graphics, Rectangle bounds, bool pointingUp, bool hover)
+        {
+            Color color = hover ? UiTheme.TextPrimary : UiTheme.TextSecondary;
+            int cx = bounds.X + bounds.Width / 2;
+            int cy = bounds.Y + bounds.Height / 2;
+            int size = 4;
+
+            Point[] triangle;
+
+            if (pointingUp)
+            {
+                triangle = new Point[]
+                {
+                    new Point(cx, cy - size),
+                    new Point(cx - size, cy + size),
+                    new Point(cx + size, cy + size)
+                };
+            }
+            else
+            {
+                triangle = new Point[]
+                {
+                    new Point(cx, cy + size),
+                    new Point(cx - size, cy - size),
+                    new Point(cx + size, cy - size)
+                };
+            }
+
+            using (SolidBrush brush = new SolidBrush(color))
+            {
+                graphics.FillPolygon(brush, triangle);
+            }
+        }
+
         private string GetHitKey(Point point)
         {
+            string bestKey = string.Empty;
+            long bestArea = long.MaxValue;
+
             foreach (KeyValuePair<string, Rectangle> pair in hitRects)
             {
                 if (pair.Value.Contains(point))
                 {
-                    return pair.Key;
+                    long area = (long)pair.Value.Width * pair.Value.Height;
+
+                    if (area < bestArea)
+                    {
+                        bestArea = area;
+                        bestKey = pair.Key;
+                    }
                 }
             }
 
-            return string.Empty;
+            return bestKey;
         }
 
         private void DispatchHit(string key)
@@ -661,6 +804,30 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            if (key.StartsWith("cmd-up:", StringComparison.OrdinalIgnoreCase))
+            {
+                RaiseReorder(CommandReorderRequested, key, -1);
+                return;
+            }
+
+            if (key.StartsWith("cmd-down:", StringComparison.OrdinalIgnoreCase))
+            {
+                RaiseReorder(CommandReorderRequested, key, 1);
+                return;
+            }
+
+            if (key.StartsWith("site-up:", StringComparison.OrdinalIgnoreCase))
+            {
+                RaiseReorder(SiteReorderRequested, key, -1);
+                return;
+            }
+
+            if (key.StartsWith("site-down:", StringComparison.OrdinalIgnoreCase))
+            {
+                RaiseReorder(SiteReorderRequested, key, 1);
+                return;
+            }
+
             DispatchActionHit(key);
         }
 
@@ -713,6 +880,17 @@ namespace LocalWebTrayShell
             if (handler != null)
             {
                 handler(null, args);
+            }
+        }
+
+        private static void RaiseReorder(EventHandler<SidebarReorderEventArgs> handler, string key, int delta)
+        {
+            int colon = key.LastIndexOf(':');
+            int index;
+
+            if (colon >= 0 && int.TryParse(key.Substring(colon + 1), out index) && index >= 0)
+            {
+                Raise(handler, new SidebarReorderEventArgs(index, delta));
             }
         }
 

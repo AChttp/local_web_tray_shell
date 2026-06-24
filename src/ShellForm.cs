@@ -229,6 +229,8 @@ namespace LocalWebTrayShell
             sidebarSurface.SiteActivated += OnSiteListItemActivated;
             sidebarSurface.CommandActionRequested += OnSidebarCommandActionRequested;
             sidebarSurface.SiteActionRequested += OnSidebarSiteActionRequested;
+            sidebarSurface.CommandReorderRequested += OnCommandReorderRequested;
+            sidebarSurface.SiteReorderRequested += OnSiteReorderRequested;
 
             sidebarSplitter = new SidebarSplitterPanel();
             sidebarSplitter.Dock = DockStyle.None;
@@ -843,6 +845,52 @@ namespace LocalWebTrayShell
                     OnOpenSiteClicked(sender, EventArgs.Empty);
                     break;
             }
+        }
+
+        private void OnCommandReorderRequested(object sender, SidebarReorderEventArgs e)
+        {
+            if (e == null)
+            {
+                return;
+            }
+
+            int target = e.Index + e.Delta;
+
+            if (e.Index < 0 || target < 0 || e.Index >= commands.Count || target >= commands.Count)
+            {
+                return;
+            }
+
+            CommandEntry temporary = commands[e.Index];
+            commands[e.Index] = commands[target];
+            commands[target] = temporary;
+
+            PersistAndSyncCommands();
+            RefreshCommandList();
+            sidebarSurface.EnsureCommandVisible(target);
+        }
+
+        private void OnSiteReorderRequested(object sender, SidebarReorderEventArgs e)
+        {
+            if (e == null)
+            {
+                return;
+            }
+
+            int target = e.Index + e.Delta;
+
+            if (e.Index < 0 || target < 0 || e.Index >= sites.Count || target >= sites.Count)
+            {
+                return;
+            }
+
+            SiteEntry temporary = sites[e.Index];
+            sites[e.Index] = sites[target];
+            sites[target] = temporary;
+
+            PersistConfig();
+            RefreshSiteList();
+            sidebarSurface.EnsureSiteVisible(target);
         }
 
         private void OnCommandListItemActivated(object sender, SidebarListItemEventArgs<CommandEntry> e)
