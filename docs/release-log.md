@@ -2,6 +2,54 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-06-25 - v1.0.4 Tray, Hotkey, and Sidebar Usability Release
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.4`
+2. Updated release documentation:
+   - `README.md`
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.4.md`
+3. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+4. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+5. Release preparation commit:
+   - Commit: `4476199`
+   - Message: `Prepare v1.0.4 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.4`
+2. Pushed the tag to GitHub:
+   - `origin v1.0.4`
+
+### GitHub Release Publication
+
+1. Created GitHub Release for tag:
+   - `v1.0.4`
+2. Release URL:
+   - `https://github.com/AChttp/local_web_tray_shell/releases/tag/v1.0.4`
+3. Uploaded release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.4-win-x64.zip`
+
+### Release Artifact Hashes
+
+- `Switch.exe`
+  - SHA256: `82D6BBDF10FAD1843AD8D9BCBCF0B86EF167DCD175BF056572F86B0F6D075DC5`
+- `Switch-v1.0.4-win-x64.zip`
+  - SHA256: `E78831BD691CEC635528E007F187CE61A9D6746529D0BD457A3AE37BCCC9D517`
+
+### Notes
+
+- This release includes tray restore responsiveness improvements, configurable global hotkey support, sidebar item reordering, maximized title-bar dragging behavior, and sidebar rendering fixes.
+- GitHub CLI was not available on the machine, so the GitHub Release was created through the GitHub REST API using the existing Git credential helper configuration and the local proxy.
+
 ## 2026-06-17 - v1.0.3 Title Bar Double-Click Release
 
 ### Versioning and Release Preparation
