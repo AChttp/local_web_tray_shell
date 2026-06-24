@@ -122,7 +122,23 @@ namespace LocalWebTrayShell
             return new AppConfig
             {
                 Sites = SanitizeSites(config.Sites),
-                Commands = SanitizeCommands(config.Commands)
+                Commands = SanitizeCommands(config.Commands),
+                GlobalHotkey = SanitizeHotkey(config.GlobalHotkey)
+            };
+        }
+
+        private static HotkeyConfig SanitizeHotkey(HotkeyConfig config)
+        {
+            if (config == null)
+            {
+                return HotkeyConstants.CreateDefault();
+            }
+
+            return new HotkeyConfig
+            {
+                Enabled = config.Enabled,
+                Modifiers = config.Modifiers & (HotkeyConstants.ModAlt | HotkeyConstants.ModControl | HotkeyConstants.ModShift | HotkeyConstants.ModWin),
+                Key = config.Key
             };
         }
 

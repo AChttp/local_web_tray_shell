@@ -19,6 +19,8 @@ namespace LocalWebTrayShell
         private const int SidebarCollapseThreshold = 96;
         private const int WM_SYSCOMMAND = 0x0112;
         private const int SC_CLOSE = 0xF060;
+        private const int WM_HOTKEY = 0x0312;
+        private const int ShowHotkeyId = 0x9001;
         private const int WM_SETREDRAW = 0x000B;
         private const int WM_NCHITTEST = 0x0084;
         private const int WM_NCLBUTTONDOWN = 0x00A1;
@@ -45,6 +47,12 @@ namespace LocalWebTrayShell
 
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
+
+        [DllImport("user32.dll")]
+        private static extern bool RegisterHotKey(IntPtr hWnd, int id, int fsModifiers, int vk);
+
+        [DllImport("user32.dll")]
+        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
         private readonly NotifyIcon notifyIcon;
         private readonly ContextMenuStrip trayMenu;
@@ -98,6 +106,9 @@ namespace LocalWebTrayShell
         private bool sidebarHidden;
         private bool resizingSidebar;
         private bool hidingToTray;
+        private HotkeyConfig pendingHotkey;
+        private bool hotkeyRegistered;
+        private ToolStripMenuItem trayHotkeyMenuItem;
         private bool titleBarDragPending;
         private int sidebarDragStartX;
         private int sidebarDragStartWidth;
@@ -125,6 +136,7 @@ namespace LocalWebTrayShell
             sites = new List<SiteEntry>(config.Sites ?? new SiteEntry[0]);
             commands = new List<CommandEntry>(config.Commands ?? new CommandEntry[0]);
             commandManager.SyncCommands(commands);
+            pendingHotkey = config.GlobalHotkey ?? HotkeyConstants.CreateDefault();
 
             workspaceMode = WorkspaceMode.Web;
 
@@ -384,6 +396,12 @@ namespace LocalWebTrayShell
             trayStartupMenuItem.CheckOnClick = true;
             trayStartupMenuItem.Click += OnTrayStartupMenuClicked;
             trayMenu.Items.Add(trayStartupMenuItem);
+
+            trayHotkeyMenuItem = new ToolStripMenuItem();
+            trayHotkeyMenuItem.Click += OnConfigureHotkeyClicked;
+            trayMenu.Items.Add(trayHotkeyMenuItem);
+            UpdateHotkeyMenuText();
+
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("\u9000\u51fa", null, delegate { ExitApplication(); });
 
@@ -475,6 +493,12 @@ namespace LocalWebTrayShell
                 ((int)m.WParam & 0xFFF0) == SC_CLOSE)
             {
                 QueueHideToTray();
+                return;
+            }
+
+            if (m.Msg == WM_HOTKEY && (int)m.WParam == ShowHotkeyId)
+            {
+                ToggleFromHotkey();
                 return;
             }
 
@@ -2149,7 +2173,8 @@ namespace LocalWebTrayShell
             AppConfigStore.Save(new AppConfig
             {
                 Sites = sites.ToArray(),
-                Commands = commands.ToArray()
+                Commands = commands.ToArray(),
+                GlobalHotkey = pendingHotkey
             });
         }
 
@@ -2437,6 +2462,108 @@ namespace LocalWebTrayShell
                 Show();
             }
             Activate();
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            TryRegisterHotkey();
+        }
+
+        protected override void OnHandleDestroyed(EventArgs e)
+        {
+            UnregisterHotkey();
+            base.OnHandleDestroyed(e);
+        }
+
+        private void TryRegisterHotkey()
+        {
+            UnregisterHotkey();
+
+            if (pendingHotkey == null || !pendingHotkey.Enabled)
+            {
+                return;
+            }
+
+            int modifiers = pendingHotkey.Modifiers | HotkeyConstants.ModNoRepeat;
+
+            if (RegisterHotKey(Handle, ShowHotkeyId, modifiers, pendingHotkey.Key))
+            {
+                hotkeyRegistered = true;
+                return;
+            }
+
+            hotkeyRegistered = false;
+            SetTransientStatus("\u5168\u5c40\u5feb\u6377\u952e\u6ce8\u518c\u5931\u8d25\uff1a\u53ef\u80fd\u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\u3002");
+
+            if (notifyIcon != null && notifyIcon.Visible)
+            {
+                notifyIcon.BalloonTipTitle = AppName;
+                notifyIcon.BalloonTipText =
+                    "\u5f53\u524d\u5feb\u6377\u952e\u53ef\u80fd\u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\uff0c\u8bf7\u5728\u8bbe\u7f6e\u4e2d\u6362\u4e00\u4e2a\u7ec4\u5408\u3002";
+                notifyIcon.ShowBalloonTip(2500);
+            }
+        }
+
+        private void UnregisterHotkey()
+        {
+            if (hotkeyRegistered)
+            {
+                UnregisterHotKey(Handle, ShowHotkeyId);
+                hotkeyRegistered = false;
+            }
+        }
+
+        // Refined toggle: hidden -> show; focused -> hide; visible-but-not-focused -> bring to front.
+        private void ToggleFromHotkey()
+        {
+            hidingToTray = false;
+
+            if (!Visible)
+            {
+                RestoreFromTray();
+                return;
+            }
+
+            if (ContainsFocus)
+            {
+                QueueHideToTray();
+                return;
+            }
+
+            RestoreFromTray();
+        }
+
+        private void OnConfigureHotkeyClicked(object sender, EventArgs e)
+        {
+            HotkeyConfig result;
+
+            using (HotkeyDialog dialog = new HotkeyDialog(pendingHotkey))
+            {
+                if (dialog.ShowDialog(this) != DialogResult.OK || dialog.Result == null)
+                {
+                    return;
+                }
+
+                result = dialog.Result;
+            }
+
+            pendingHotkey = result;
+            TryRegisterHotkey();
+            PersistConfig();
+            UpdateHotkeyMenuText();
+        }
+
+        private void UpdateHotkeyMenuText()
+        {
+            if (trayHotkeyMenuItem == null)
+            {
+                return;
+            }
+
+            trayHotkeyMenuItem.Text = pendingHotkey != null && pendingHotkey.Enabled
+                ? "\u5feb\u6377\u952e\u8bbe\u7f6e\u2026 (" + pendingHotkey.ToDisplayString() + ")"
+                : "\u5feb\u6377\u952e\u8bbe\u7f6e\u2026";
         }
 
         private void ExitApplication()

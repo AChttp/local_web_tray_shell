@@ -104,6 +104,190 @@ namespace LocalWebTrayShell
         }
     }
 
+    internal sealed class HotkeyDialog : Form
+    {
+        private readonly CheckBox enableCheckBox;
+        private readonly Label comboLabel;
+        private readonly ThemedButton saveButton;
+        private readonly ThemedButton cancelButton;
+
+        private int capturedModifiers;
+        private int capturedKey;
+        private bool hasCapture;
+
+        public HotkeyDialog(HotkeyConfig initial)
+        {
+            DialogUi.StyleForm(this, "\u5feb\u6377\u952e\u8bbe\u7f6e", new Size(440, 270));
+            KeyPreview = true;
+            KeyDown += OnCaptureKeyDown;
+
+            TableLayoutPanel layout = DialogUi.CreateLayout();
+            layout.RowCount = 5;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            comboLabel = new Label();
+            comboLabel.Dock = DockStyle.Fill;
+            comboLabel.BackColor = UiTheme.Surface;
+            comboLabel.ForeColor = UiTheme.TextPrimary;
+            comboLabel.Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Regular);
+            comboLabel.TextAlign = ContentAlignment.MiddleCenter;
+
+            enableCheckBox = DialogUi.CreateCheckBox("\u542f\u7528\u5168\u5c40\u5feb\u6377\u952e\uff08\u6258\u76d8\u540e\u53f0\u4e5f\u751f\u6548\uff09");
+            enableCheckBox.Dock = DockStyle.Fill;
+
+            saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
+            cancelButton = DialogUi.CreateCancelButton();
+
+            layout.Controls.Add(DialogUi.CreateLabel("\u8bf7\u76f4\u63a5\u6309\u4e0b\u7ec4\u5408\u952e\uff08\u5982 Ctrl + `\uff09"), 0, 0);
+            layout.Controls.Add(comboLabel, 0, 1);
+            layout.Controls.Add(DialogUi.CreateSmallLabel("\u9700\u5305\u542b Ctrl \u6216 Alt \u4e4b\u4e00\uff1bWin \u952e\u6682\u4e0d\u652f\u6301"), 0, 2);
+            layout.Controls.Add(enableCheckBox, 0, 3);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 4);
+
+            Controls.Add(layout);
+            AcceptButton = saveButton;
+            CancelButton = cancelButton;
+
+            if (initial != null)
+            {
+                enableCheckBox.Checked = initial.Enabled;
+
+                if (initial.Key != 0)
+                {
+                    capturedModifiers = initial.Modifiers;
+                    capturedKey = initial.Key;
+                    hasCapture = true;
+                }
+            }
+
+            UpdateComboLabel();
+        }
+
+        public HotkeyConfig Result { get; private set; }
+
+        private void OnCaptureKeyDown(object sender, KeyEventArgs e)
+        {
+            Keys code = e.KeyCode;
+
+            // Let Enter/Escape reach the Accept/Cancel buttons when no modifier is held.
+            if (e.Modifiers == Keys.None && (code == Keys.Return || code == Keys.Escape))
+            {
+                return;
+            }
+
+            // Ignore bare modifier presses; wait for an actual key.
+            if (code == Keys.ControlKey || code == Keys.Menu || code == Keys.ShiftKey ||
+                code == Keys.LControlKey || code == Keys.RControlKey ||
+                code == Keys.LMenu || code == Keys.RMenu ||
+                code == Keys.LShiftKey || code == Keys.RShiftKey ||
+                code == Keys.LWin || code == Keys.RWin)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                return;
+            }
+
+            e.Handled = true;
+            e.SuppressKeyPress = true;
+
+            int modifiers = 0;
+
+            if ((e.Modifiers & Keys.Control) == Keys.Control)
+            {
+                modifiers |= HotkeyConstants.ModControl;
+            }
+
+            if ((e.Modifiers & Keys.Alt) == Keys.Alt)
+            {
+                modifiers |= HotkeyConstants.ModAlt;
+            }
+
+            if ((e.Modifiers & Keys.Shift) == Keys.Shift)
+            {
+                modifiers |= HotkeyConstants.ModShift;
+            }
+
+            capturedModifiers = modifiers;
+            capturedKey = e.KeyValue;
+            hasCapture = true;
+            UpdateComboLabel();
+        }
+
+        private void UpdateComboLabel()
+        {
+            if (!hasCapture)
+            {
+                comboLabel.Text = "\uff08\u8bf7\u6309\u4e0b\u7ec4\u5408\u952e\uff09";
+                comboLabel.ForeColor = UiTheme.TextSecondary;
+                return;
+            }
+
+            comboLabel.Text = HotkeyConfig.ToDisplayString(capturedModifiers, capturedKey);
+            comboLabel.ForeColor = UiTheme.TextPrimary;
+        }
+
+        private bool IsCaptureValid()
+        {
+            if (!hasCapture)
+            {
+                return false;
+            }
+
+            int required = HotkeyConstants.ModControl | HotkeyConstants.ModAlt;
+
+            return (capturedModifiers & required) != 0;
+        }
+
+        private void OnSaveClicked(object sender, EventArgs e)
+        {
+            if (enableCheckBox.Checked)
+            {
+                if (!hasCapture)
+                {
+                    MessageBox.Show(
+                        "\u8bf7\u5148\u6309\u4e0b\u8981\u8bbe\u7f6e\u7684\u7ec4\u5408\u952e\u3002",
+                        Text,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (!IsCaptureValid())
+                {
+                    MessageBox.Show(
+                        "\u7ec4\u5408\u952e\u9700\u5305\u542b Ctrl \u6216 Alt\uff08Shift \u5355\u72ec\u65e0\u6548\uff09\u3002",
+                        Text,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    return;
+                }
+
+                Result = new HotkeyConfig
+                {
+                    Enabled = true,
+                    Modifiers = capturedModifiers,
+                    Key = capturedKey
+                };
+            }
+            else
+            {
+                Result = new HotkeyConfig
+                {
+                    Enabled = false,
+                    Modifiers = capturedModifiers,
+                    Key = capturedKey
+                };
+            }
+
+            DialogResult = DialogResult.OK;
+            Close();
+        }
+    }
+
     internal sealed class CommandDialog : Form
     {
         private readonly TextBox nameTextBox;
