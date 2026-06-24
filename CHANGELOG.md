@@ -2,6 +2,28 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.4 - 2026-06-25
+
+Maintenance release focused on tray/window responsiveness and sidebar usability.
+
+### Added
+
+- Global hotkey to show or hide the main window from anywhere (default `Ctrl + ``, disabled by default; configurable via the tray menu).
+- Move up / move down controls for command and site list items, with order persisted across restarts.
+
+### Fixed
+
+- Restoring the window from the tray is now near-instant; removed the window handle recreation that previously caused a ~2s delay while the embedded WebView2 re-attached.
+- Dragging the title bar of a maximized window now restores it to normal size and follows the pointer, matching standard Windows behavior.
+- Fixed the command/site section titles ("命令" / "站点") having their bottom pixels clipped.
+- Fixed the sidebar lists going blank or not refilling after switching the window between normal and maximized.
+- Fixed list item text bleeding past the list edge (into the section header) when scrolled, because GDI text ignored the list clip region.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.4-win-x64.zip`
+
 ## v1.0.3 - 2026-06-17
 
 Maintenance release focused on title bar window behavior.

@@ -4,7 +4,7 @@
 
 ![Switch 界面预览](full_screen_capture.png)
 
-当前公开版本：`v1.0.3`
+当前公开版本：`v1.0.4`
 
 ## 功能
 
