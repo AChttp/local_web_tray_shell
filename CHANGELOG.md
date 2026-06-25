@@ -2,6 +2,35 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.5 - 2026-06-25
+
+Maintenance release focused on audit-driven correctness fixes and sidebar/usability improvements.
+
+### Added
+
+- Per-command working directory and environment variables (editable in the command dialog with a folder Browse button; applied to the spawned process).
+- Draggable splitter between the command and site sections of the sidebar; the height ratio is persisted.
+- Single-instance enforcement via a named mutex; a second launch exits silently instead of failing on the in-use WebView2 user-data folder.
+- Confirmation dialog before "Stop all" on both the sidebar button and the tray menu.
+- Site health dots on site cards from a periodic HTTP probe (green = up, red = down).
+- Sidebar keyboard navigation: Up/Down selects, Enter activates, Delete removes (with the existing confirm).
+- Restart as a 5th command action button, using the existing restart engine.
+- Import/export of the full configuration to/from a JSON file via the tray menu.
+
+### Fixed
+
+- A corrupt config is now backed up instead of being silently overwritten with defaults on the next save.
+- Config writes are now atomic (temp file + replace), so a crash or antivirus lock cannot truncate it.
+- Site-URL dedup is now consistent between the add/edit dialog and the persistence layer (previously two URLs that normalized to the same AbsoluteUri could both be added but one vanished on save).
+- WebView2 controls and their navigation handlers are now torn down on exit and on site deletion.
+- `Process` objects are now disposed at every lifecycle transition (start failure, process exit, command deletion) instead of leaking handles.
+- The exit path now kills process trees synchronously, so no child process is orphaned and no `process.Exited` callback mutates state after the app exits.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.5-win-x64.zip`
+
 ## v1.0.4 - 2026-06-25
 
 Maintenance release focused on tray/window responsiveness and sidebar usability.
