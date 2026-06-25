@@ -2,6 +2,54 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-06-25 - v1.0.5 Correctness Fixes and Sidebar/Usability Improvements Release
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.5`
+2. Updated release documentation:
+   - `README.md`
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.5.md`
+3. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+4. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+5. Release preparation commit:
+   - Commit: `76d3699`
+   - Message: `Prepare v1.0.5 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.5`
+2. Pushed the tag to GitHub:
+   - `origin v1.0.5`
+
+### GitHub Release Publication
+
+1. Created GitHub Release for tag:
+   - `v1.0.5`
+2. Release URL:
+   - `https://github.com/AChttp/local_web_tray_shell/releases/tag/v1.0.5`
+3. Uploaded release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.5-win-x64.zip`
+
+### Release Artifact Hashes
+
+- `Switch.exe`
+  - SHA256: `05C00B6841A443DE070F446D669B8E16B8CF77C057DE3ABCB35394B3A2DC8FD9`
+- `Switch-v1.0.5-win-x64.zip`
+  - SHA256: `BC167350F38AAD908487D6AE0876A916EEC6967C3DA402AE00102A3FB7EF3FAE`
+
+### Notes
+
+- This release includes per-command working directory and environment variables, a draggable sidebar section splitter, single-instance enforcement, stop-all confirmation, site health dots, sidebar keyboard navigation, a restart action, config import/export, and audit-driven data-safety / WebView2 / process-lifecycle fixes.
+- GitHub CLI was not available on the machine, so the GitHub Release was created through the GitHub REST API using the existing Git credential helper configuration and the local proxy.
+
 ## 2026-06-25 - v1.0.4 Tray, Hotkey, and Sidebar Usability Release
 
 ### Versioning and Release Preparation
