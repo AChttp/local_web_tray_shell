@@ -46,9 +46,15 @@ namespace LocalWebTrayShell
                 {
                     if (!incoming.ContainsKey(existingId))
                     {
-                        DisposeRetryTimerLocked(runtimes[existingId]);
+                        CommandRuntimeState removed = runtimes[existingId];
+                        DisposeRetryTimerLocked(removed);
                         runtimes.Remove(existingId);
                         removedIds.Add(existingId);
+
+                        // Releasing the runtime drops our last reference to its Process;
+                        // dispose the handle so it does not leak on command deletion.
+                        DisposeProcessSafely(removed.Process);
+                        removed.Process = null;
                     }
                 }
 
@@ -340,7 +346,7 @@ namespace LocalWebTrayShell
 
         public void Dispose()
         {
-            List<int> activeProcessIds = new List<int>();
+            List<Process> processesToKill = new List<Process>();
 
             lock (syncRoot)
             {
@@ -355,28 +361,48 @@ namespace LocalWebTrayShell
                 {
                     DisposeRetryTimerLocked(runtime);
 
-                    if (IsProcessActive(runtime.Process))
+                    if (runtime.Process != null)
                     {
-                        int processId = GetProcessId(runtime.Process).GetValueOrDefault();
-
-                        if (processId > 0)
-                        {
-                            activeProcessIds.Add(processId);
-                        }
+                        processesToKill.Add(runtime.Process);
+                        runtime.Process = null;
                     }
                 }
             }
 
-            for (int index = 0; index < activeProcessIds.Count; index++)
+            // Kill synchronously on the shutdown path (rather than via the async
+            // QueueProcessTreeKill used by Stop), wait for each process to actually exit,
+            // then dispose it. This guarantees no process.Exited callback mutates a runtime
+            // after Dispose returns, no child tree is orphaned, and no Process handle leaks.
+            for (int index = 0; index < processesToKill.Count; index++)
             {
-                TryKillProcessTreeSilently(activeProcessIds[index]);
+                Process process = processesToKill[index];
+
+                try
+                {
+                    int? processId = GetProcessId(process);
+
+                    if (processId.GetValueOrDefault() > 0)
+                    {
+                        TryKillProcessTreeSilently(processId.Value);
+                    }
+
+                    if (!process.WaitForExit(2000))
+                    {
+                        continue;
+                    }
+                }
+                catch
+                {
+                }
+
+                DisposeProcessSafely(process);
             }
         }
 
         private void StartInternal(string commandId, bool fromRetry)
         {
             CommandEntry command;
-            Process process;
+            Process process = null;
 
             lock (syncRoot)
             {
@@ -468,6 +494,7 @@ namespace LocalWebTrayShell
             catch (Exception ex)
             {
                 bool scheduledRetry;
+                Process processToDispose = process;
 
                 lock (syncRoot)
                 {
@@ -475,6 +502,7 @@ namespace LocalWebTrayShell
 
                     if (!runtimes.TryGetValue(commandId, out runtime))
                     {
+                        DisposeProcessSafely(processToDispose);
                         return;
                     }
 
@@ -484,12 +512,29 @@ namespace LocalWebTrayShell
                     scheduledRetry = ScheduleRetryLocked(runtime);
                 }
 
+                DisposeProcessSafely(processToDispose);
                 RaiseRuntimeChanged(commandId);
 
                 if (scheduledRetry)
                 {
                     RaiseRuntimeChanged(commandId);
                 }
+            }
+        }
+
+        private static void DisposeProcessSafely(Process process)
+        {
+            if (process == null)
+            {
+                return;
+            }
+
+            try
+            {
+                process.Dispose();
+            }
+            catch
+            {
             }
         }
 
@@ -537,6 +582,7 @@ namespace LocalWebTrayShell
         {
             bool restartNow = false;
             int? returnCode = null;
+            Process processToDispose = null;
 
             try
             {
@@ -549,6 +595,11 @@ namespace LocalWebTrayShell
             lock (syncRoot)
             {
                 CommandRuntimeState runtime;
+
+                if (disposed)
+                {
+                    return;
+                }
 
                 if (!runtimes.TryGetValue(commandId, out runtime))
                 {
@@ -566,6 +617,7 @@ namespace LocalWebTrayShell
                 }
 
                 runtime.Process = null;
+                processToDispose = process;
                 runtime.ReturnCode = returnCode;
                 runtime.RetryDueAtUtc = null;
 
@@ -608,6 +660,7 @@ namespace LocalWebTrayShell
                 }
             }
 
+            DisposeProcessSafely(processToDispose);
             RaiseRuntimeChanged(commandId);
 
             if (restartNow)

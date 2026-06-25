@@ -1422,6 +1422,8 @@ namespace LocalWebTrayShell
             if (siteViews.TryGetValue(selectedSite.Id, out viewState))
             {
                 webViewHost.Controls.Remove(viewState.WebView);
+                viewState.WebView.NavigationStarting -= OnNavigationStarting;
+                viewState.WebView.NavigationCompleted -= OnNavigationCompleted;
                 if (viewState.WebView.CoreWebView2 != null)
                 {
                     viewState.WebView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
@@ -2674,10 +2676,16 @@ namespace LocalWebTrayShell
 
         private bool ContainsSiteUrl(string url, string ignoredSiteId)
         {
+            string normalizedUrl = AppConfigStore.NormalizeUrl(url);
+
             foreach (SiteEntry site in sites)
             {
-                if (!string.Equals(site.Id, ignoredSiteId, StringComparison.OrdinalIgnoreCase) &&
-                    string.Equals(site.Url, url, StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(site.Id, ignoredSiteId, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (string.Equals(AppConfigStore.NormalizeUrl(site.Url), normalizedUrl, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
@@ -2786,6 +2794,43 @@ namespace LocalWebTrayShell
             {
                 SendMessage(textBox.Handle, EM_LINESCROLL, IntPtr.Zero, new IntPtr(delta));
             }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing)
+            {
+                // Tear down cached WebView2 controls explicitly: unhook the navigation
+                // handlers and dispose each control so the embedded browser process can
+                // release the user-data folder. The default Form dispose does not do this.
+                foreach (SiteViewState state in siteViews.Values)
+                {
+                    if (state.WebView == null)
+                    {
+                        continue;
+                    }
+
+                    state.WebView.NavigationStarting -= OnNavigationStarting;
+                    state.WebView.NavigationCompleted -= OnNavigationCompleted;
+
+                    if (state.WebView.CoreWebView2 != null)
+                    {
+                        state.WebView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+                    }
+
+                    try
+                    {
+                        state.WebView.Dispose();
+                    }
+                    catch
+                    {
+                    }
+                }
+
+                siteViews.Clear();
+            }
+
+            base.Dispose(disposing);
         }
 
         private sealed class SiteViewState

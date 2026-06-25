@@ -35,6 +35,10 @@ namespace LocalWebTrayShell
             }
             catch
             {
+                // The config on disk is unreadable. Keep running with defaults, but
+                // preserve the bad file as a backup so the user can recover it --
+                // otherwise the next Save() would silently overwrite it with defaults.
+                BackupCorruptConfig();
                 config = CreateDefaultConfig();
             }
 
@@ -58,11 +62,60 @@ namespace LocalWebTrayShell
             config = Sanitize(config);
             Directory.CreateDirectory(AppPaths.LocalRootDirectory);
 
-            using (FileStream stream = new FileStream(AppPaths.ConfigPath, FileMode.Create, FileAccess.Write))
+            // Write to a temp file then atomically replace, so a crash/AV lock mid-write
+            // cannot leave a truncated config that would trip Load()'s corrupt-config path.
+            string tempPath = AppPaths.ConfigPath + ".tmp";
+
+            using (FileStream stream = new FileStream(tempPath, FileMode.Create, FileAccess.Write))
             {
                 DataContractJsonSerializer serializer =
                     new DataContractJsonSerializer(typeof(AppConfig));
                 serializer.WriteObject(stream, config);
+            }
+
+            try
+            {
+                if (File.Exists(AppPaths.ConfigPath))
+                {
+                    string backupPath = AppPaths.ConfigPath + ".bak";
+                    File.Replace(tempPath, AppPaths.ConfigPath, backupPath);
+                }
+                else
+                {
+                    File.Move(tempPath, AppPaths.ConfigPath);
+                }
+            }
+            catch
+            {
+                // If the atomic move failed, fall back to leaving the existing file intact
+                // rather than risking a partial write. Best-effort cleanup of the temp file.
+                try
+                {
+                    if (File.Exists(tempPath))
+                    {
+                        File.Delete(tempPath);
+                    }
+                }
+                catch
+                {
+                }
+            }
+        }
+
+        private static void BackupCorruptConfig()
+        {
+            try
+            {
+                byte[] bytes = File.ReadAllBytes(AppPaths.ConfigPath);
+                string backupPath = AppPaths.ConfigPath + ".corrupt-" + DateTime.UtcNow.Ticks;
+
+                using (FileStream stream = new FileStream(backupPath, FileMode.Create, FileAccess.Write))
+                {
+                    stream.Write(bytes, 0, bytes.Length);
+                }
+            }
+            catch
+            {
             }
         }
 
@@ -142,6 +195,29 @@ namespace LocalWebTrayShell
             };
         }
 
+        // Normalizes a site URL the same way SanitizeSites does, so dedup logic is
+        // identical everywhere (the dialog checks for duplicates before add/edit must
+        // match the persistence-layer dedup, or two URLs that normalize to the same
+        // AbsoluteUri would be accepted by the dialog but silently collapsed on save).
+        public static string NormalizeUrl(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+            {
+                return string.Empty;
+            }
+
+            Uri uri;
+
+            if (Uri.TryCreate(url.Trim(), UriKind.Absolute, out uri) &&
+                (string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+            {
+                return uri.AbsoluteUri;
+            }
+
+            return url.Trim();
+        }
+
         private static SiteEntry[] SanitizeSites(IList<SiteEntry> sites)
         {
             Dictionary<string, SiteEntry> uniqueSites =
@@ -157,7 +233,6 @@ namespace LocalWebTrayShell
             for (index = 0; index < sites.Count; index++)
             {
                 SiteEntry site = sites[index];
-                Uri uri;
                 string normalizedUrl;
                 string name;
                 string id;
@@ -167,26 +242,24 @@ namespace LocalWebTrayShell
                     continue;
                 }
 
-                if (!Uri.TryCreate(site.Url.Trim(), UriKind.Absolute, out uri))
+                normalizedUrl = NormalizeUrl(site.Url);
+
+                if (string.IsNullOrEmpty(normalizedUrl) ||
+                    !normalizedUrl.StartsWith(Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
-
-                if (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
-                normalizedUrl = uri.AbsoluteUri;
 
                 if (uniqueSites.ContainsKey(normalizedUrl))
                 {
                     continue;
                 }
 
+                Uri uri;
+                Uri.TryCreate(normalizedUrl, UriKind.Absolute, out uri);
+
                 name = string.IsNullOrWhiteSpace(site.Name)
-                    ? uri.Host + (uri.IsDefaultPort ? string.Empty : ":" + uri.Port)
+                    ? (uri == null ? normalizedUrl : uri.Host + (uri.IsDefaultPort ? string.Empty : ":" + uri.Port))
                     : site.Name.Trim();
                 id = string.IsNullOrWhiteSpace(site.Id) ? NewId("site") : site.Id.Trim();
 
