@@ -548,7 +548,29 @@ namespace LocalWebTrayShell
             startInfo.CreateNoWindow = true;
             startInfo.RedirectStandardError = true;
             startInfo.RedirectStandardOutput = true;
-            startInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
+
+            if (string.IsNullOrWhiteSpace(command.WorkingDirectory) ||
+                !Directory.Exists(command.WorkingDirectory))
+            {
+                startInfo.WorkingDirectory = AppDomain.CurrentDomain.BaseDirectory;
+            }
+            else
+            {
+                startInfo.WorkingDirectory = command.WorkingDirectory.Trim();
+            }
+
+            if (command.EnvironmentVariables != null)
+            {
+                for (int index = 0; index < command.EnvironmentVariables.Length; index++)
+                {
+                    EnvironmentVariableEntry entry = command.EnvironmentVariables[index];
+
+                    if (entry != null && !string.IsNullOrWhiteSpace(entry.Key))
+                    {
+                        startInfo.EnvironmentVariables[entry.Key.Trim()] = entry.Value ?? string.Empty;
+                    }
+                }
+            }
 
             if (runMode == RunModeCatalog.Cmd)
             {

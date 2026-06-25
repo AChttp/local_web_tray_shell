@@ -22,6 +22,7 @@ namespace LocalWebTrayShell
         Add,
         Edit,
         Delete,
+        Restart,
         StartStop
     }
 
@@ -83,7 +84,8 @@ namespace LocalWebTrayShell
         private const int OuterRight = 16;
         private const int OuterBottom = 14;
         private const int BrandHeight = 164;
-        private const int CommandSectionHeight = 332;
+        private const int MinSectionHeight = 180;
+        private const int SplitterHeight = 8;
         private const int SectionPaddingTop = 14;
         private const int SectionTitleHeight = 30;
         private const int ReorderColumnWidth = 28;
@@ -107,9 +109,13 @@ namespace LocalWebTrayShell
         private readonly Dictionary<string, Rectangle> hitRects;
         private Rectangle commandListRect;
         private Rectangle siteListRect;
+        private Rectangle splitterRect;
         private string hoverKey;
         private int commandScrollY;
         private int siteScrollY;
+        private double commandSectionRatio;
+        private bool draggingSplitter;
+        private Point lastMousePosition;
 
         public SidebarSurfaceControl()
         {
@@ -127,6 +133,7 @@ namespace LocalWebTrayShell
             BackColor = UiTheme.SidebarBackground;
             Cursor = Cursors.Default;
             DoubleBuffered = true;
+            commandSectionRatio = AppConfigStore.DefaultCommandSectionRatio;
             SetStyle(
                 ControlStyles.AllPaintingInWmPaint |
                 ControlStyles.OptimizedDoubleBuffer |
@@ -135,6 +142,28 @@ namespace LocalWebTrayShell
                 ControlStyles.Selectable,
                 true);
         }
+
+        public double CommandSectionRatio
+        {
+            get
+            {
+                return commandSectionRatio;
+            }
+            set
+            {
+                double clamped = ClampRatio(value);
+
+                if (clamped != commandSectionRatio)
+                {
+                    commandSectionRatio = clamped;
+                    Invalidate();
+                }
+            }
+        }
+
+        public Func<string, SiteHealth> SiteHealthProvider { get; set; }
+
+        public bool RestartCommandEnabled { get; set; }
 
         public event EventHandler StopAllCommandsClicked;
         public event EventHandler BackSiteClicked;
@@ -282,22 +311,75 @@ namespace LocalWebTrayShell
         {
             Rectangle content = GetContentBounds();
             Rectangle brand = new Rectangle(content.X, content.Y, content.Width, BrandHeight);
-            Rectangle commandSection = new Rectangle(content.X, brand.Bottom, content.Width, CommandSectionHeight);
+            int availableHeight = Math.Max(0, content.Bottom - brand.Bottom);
+            int commandHeight = ClampCommandSectionHeight(
+                (int)(availableHeight * commandSectionRatio),
+                availableHeight);
+
+            Rectangle commandSection = new Rectangle(content.X, brand.Bottom, content.Width, commandHeight);
+            splitterRect = new Rectangle(content.X, commandSection.Bottom, content.Width, SplitterHeight);
             Rectangle siteSection = new Rectangle(
                 content.X,
-                commandSection.Bottom,
+                splitterRect.Bottom,
                 content.Width,
-                Math.Max(0, content.Bottom - commandSection.Bottom));
+                Math.Max(0, content.Bottom - splitterRect.Bottom));
 
             e.Graphics.Clear(BackColor);
             hitRects.Clear();
             DrawBrand(e.Graphics, brand);
             DrawCommandSection(e.Graphics, commandSection);
+            DrawSplitter(e.Graphics, splitterRect);
             DrawSiteSection(e.Graphics, siteSection);
+        }
+
+        private static double ClampRatio(double ratio)
+        {
+            if (ratio < 0.20 || ratio > 0.80 || double.IsNaN(ratio) || double.IsInfinity(ratio))
+            {
+                return AppConfigStore.DefaultCommandSectionRatio;
+            }
+
+            return ratio;
+        }
+
+        // Keep both sections tall enough to render their title + action row + at least one item.
+        private int ClampCommandSectionHeight(int desired, int availableHeight)
+        {
+            int min = MinSectionHeight;
+
+            if (availableHeight < min * 2)
+            {
+                return Math.Max(min, availableHeight);
+            }
+
+            int max = availableHeight - min;
+
+            return Math.Min(max, Math.Max(min, desired));
+        }
+
+        private void DrawSplitter(Graphics graphics, Rectangle bounds)
+        {
+            hitRects["section-split"] = bounds;
+            bool hover = draggingSplitter || string.Equals(hoverKey, "section-split", StringComparison.OrdinalIgnoreCase);
+            Color color = hover ? UiTheme.Border : UiTheme.BorderSoft;
+            int y = bounds.Y + (bounds.Height / 2);
+
+            using (Pen pen = new Pen(color))
+            {
+                graphics.DrawLine(pen, bounds.X, y, bounds.Right, y);
+            }
         }
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            lastMousePosition = e.Location;
+
+            if (draggingSplitter)
+            {
+                UpdateSplitterFromMouse(e.Location);
+                return;
+            }
+
             string nextHover = GetHitKey(e.Location);
 
             if (!string.Equals(hoverKey, nextHover, StringComparison.OrdinalIgnoreCase))
@@ -306,19 +388,54 @@ namespace LocalWebTrayShell
                 Invalidate();
             }
 
-            Cursor = string.IsNullOrEmpty(nextHover) ? Cursors.Default : Cursors.Hand;
+            Cursor = ResolveCursor(nextHover);
             base.OnMouseMove(e);
+        }
+
+        private Cursor ResolveCursor(string hover)
+        {
+            if (draggingSplitter || string.Equals(hover, "section-split", StringComparison.OrdinalIgnoreCase))
+            {
+                return Cursors.SizeNS;
+            }
+
+            return string.IsNullOrEmpty(hover) ? Cursors.Default : Cursors.Hand;
+        }
+
+        private void UpdateSplitterFromMouse(Point location)
+        {
+            Rectangle content = GetContentBounds();
+            int brandBottom = content.Y + BrandHeight;
+            int availableHeight = Math.Max(0, content.Bottom - brandBottom);
+
+            if (availableHeight <= 0)
+            {
+                return;
+            }
+
+            double ratio = (double)(location.Y - brandBottom) / availableHeight;
+            double clamped = ClampRatio(ratio);
+
+            if (clamped != commandSectionRatio)
+            {
+                commandSectionRatio = clamped;
+                Invalidate();
+            }
         }
 
         protected override void OnMouseLeave(EventArgs e)
         {
-            if (!string.IsNullOrEmpty(hoverKey))
+            if (!draggingSplitter && !string.IsNullOrEmpty(hoverKey))
             {
                 hoverKey = string.Empty;
                 Invalidate();
             }
 
-            Cursor = Cursors.Default;
+            if (!draggingSplitter)
+            {
+                Cursor = Cursors.Default;
+            }
+
             base.OnMouseLeave(e);
         }
 
@@ -338,8 +455,203 @@ namespace LocalWebTrayShell
             }
 
             key = GetHitKey(e.Location);
+
+            if (string.Equals(key, "section-split", StringComparison.OrdinalIgnoreCase))
+            {
+                draggingSplitter = true;
+                Capture = true;
+                Cursor = Cursors.SizeNS;
+                return;
+            }
+
             DispatchHit(key);
             base.OnMouseDown(e);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            if (draggingSplitter)
+            {
+                draggingSplitter = false;
+                Capture = false;
+                Invalidate();
+                RaiseRatioChanged();
+            }
+
+            base.OnMouseUp(e);
+        }
+
+        private void RaiseRatioChanged()
+        {
+            EventHandler handler = CommandSectionRatioChanged;
+            if (handler != null)
+            {
+                handler(this, EventArgs.Empty);
+            }
+        }
+
+        public event EventHandler CommandSectionRatioChanged;
+
+        protected override void OnPreviewKeyDown(PreviewKeyDownEventArgs e)
+        {
+            // Make arrow keys reach OnKeyDown instead of being consumed for focus navigation.
+            if (e.KeyCode == Keys.Up || e.KeyCode == Keys.Down ||
+                e.KeyCode == Keys.PageUp || e.KeyCode == Keys.PageDown ||
+                e.KeyCode == Keys.Enter || e.KeyCode == Keys.Delete)
+            {
+                e.IsInputKey = true;
+            }
+
+            base.OnPreviewKeyDown(e);
+        }
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            if (e == null || e.Handled)
+            {
+                base.OnKeyDown(e);
+                return;
+            }
+
+            bool siteActive = siteListRect.Contains(lastMousePosition);
+
+            switch (e.KeyCode)
+            {
+                case Keys.Up:
+                case Keys.Down:
+                case Keys.PageUp:
+                case Keys.PageDown:
+                    MoveSelection(siteActive, e.KeyCode);
+                    e.Handled = true;
+                    break;
+                case Keys.Enter:
+                    ActivateSelection(siteActive);
+                    e.Handled = true;
+                    break;
+                case Keys.Delete:
+                    DeleteSelection(siteActive);
+                    e.Handled = true;
+                    break;
+            }
+
+            base.OnKeyDown(e);
+        }
+
+        private void MoveSelection(bool siteActive, Keys key)
+        {
+            int step = (key == Keys.PageUp || key == Keys.PageDown) ? 4 : 1;
+            int direction = (key == Keys.Up || key == Keys.PageUp) ? -1 : 1;
+
+            if (siteActive)
+            {
+                int index = IndexOfSelectedSite();
+
+                if (index < 0)
+                {
+                    index = sites.Count > 0 ? 0 : -1;
+                }
+                else
+                {
+                    index = Math.Max(0, Math.Min(sites.Count - 1, index + direction * step));
+                }
+
+                if (index >= 0 && index < sites.Count)
+                {
+                    SelectedSiteId = sites[index].Id;
+                    EnsureSiteVisible(index);
+                    Invalidate();
+                }
+            }
+            else
+            {
+                int index = IndexOfSelectedCommand();
+
+                if (index < 0)
+                {
+                    index = commands.Count > 0 ? 0 : -1;
+                }
+                else
+                {
+                    index = Math.Max(0, Math.Min(commands.Count - 1, index + direction * step));
+                }
+
+                if (index >= 0 && index < commands.Count)
+                {
+                    SelectedCommandId = commands[index].Id;
+                    EnsureCommandVisible(index);
+                    Invalidate();
+                }
+            }
+        }
+
+        private void ActivateSelection(bool siteActive)
+        {
+            if (siteActive)
+            {
+                int index = IndexOfSelectedSite();
+
+                if (index >= 0 && index < sites.Count)
+                {
+                    Raise(SiteActivated, new SidebarListItemEventArgs<SiteEntry>(sites[index]));
+                }
+            }
+            else
+            {
+                int index = IndexOfSelectedCommand();
+
+                if (index >= 0 && index < commands.Count)
+                {
+                    Raise(CommandActivated, new SidebarListItemEventArgs<CommandEntry>(commands[index]));
+                }
+            }
+        }
+
+        private void DeleteSelection(bool siteActive)
+        {
+            if (siteActive)
+            {
+                Raise(SiteActionRequested, new SidebarSiteActionEventArgs(SidebarSiteAction.Delete));
+            }
+            else
+            {
+                Raise(CommandActionRequested, new SidebarCommandActionEventArgs(SidebarCommandAction.Delete));
+            }
+        }
+
+        private int IndexOfSelectedCommand()
+        {
+            if (string.IsNullOrEmpty(SelectedCommandId))
+            {
+                return -1;
+            }
+
+            for (int index = 0; index < commands.Count; index++)
+            {
+                if (string.Equals(commands[index].Id, SelectedCommandId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
+        }
+
+        private int IndexOfSelectedSite()
+        {
+            if (string.IsNullOrEmpty(SelectedSiteId))
+            {
+                return -1;
+            }
+
+            for (int index = 0; index < sites.Count; index++)
+            {
+                if (string.Equals(sites[index].Id, SelectedSiteId, StringComparison.OrdinalIgnoreCase))
+                {
+                    return index;
+                }
+            }
+
+            return -1;
         }
 
         protected override void OnMouseWheel(MouseEventArgs e)
@@ -410,12 +722,13 @@ namespace LocalWebTrayShell
             commandListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
             TextRenderer.DrawText(graphics, "\u547d\u4ee4", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
             DrawCommandList(graphics, commandListRect);
-            DrawFourButtons(
+            DrawFiveButtons(
                 graphics,
                 actions,
                 new ButtonSpec("\u65b0\u589e", true, true, "cmd-add"),
                 new ButtonSpec("\u7f16\u8f91", false, EditCommandEnabled, "cmd-edit"),
                 new ButtonSpec("\u5220\u9664", false, DeleteCommandEnabled, "cmd-delete"),
+                new ButtonSpec("\u91cd\u542f", false, RestartCommandEnabled, "cmd-restart"),
                 new ButtonSpec(string.IsNullOrEmpty(StartStopCommandText) ? "\u542f\u52a8" : StartStopCommandText, true, StartStopCommandEnabled, "cmd-startstop"));
         }
 
@@ -543,28 +856,88 @@ namespace LocalWebTrayShell
             }
 
             int siteContentRight = bounds.Right - ReorderColumnWidth - 4;
-            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, siteContentRight - bounds.X - 32), 20), UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
-            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, new Rectangle(bounds.X + 26, bounds.Y + 34, Math.Max(1, siteContentRight - bounds.X - 32), 18), UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
+            DrawSiteHealthDot(graphics, site, bounds);
+            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, new Rectangle(bounds.X + 42, bounds.Y + 9, Math.Max(1, siteContentRight - bounds.X - 48), 20), UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
+            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, new Rectangle(bounds.X + 42, bounds.Y + 34, Math.Max(1, siteContentRight - bounds.X - 48), 18), UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
             hitRects["site:" + index] = bounds;
             DrawReorderHandles(graphics, bounds, "site", index, sites.Count, selected || itemHovered);
         }
 
+        private void DrawSiteHealthDot(Graphics graphics, SiteEntry site, Rectangle bounds)
+        {
+            if (site == null || SiteHealthProvider == null)
+            {
+                return;
+            }
+
+            SiteHealth health;
+            Color color;
+
+            try
+            {
+                health = SiteHealthProvider(site.Id);
+            }
+            catch
+            {
+                return;
+            }
+
+            switch (health)
+            {
+                case SiteHealth.Up:
+                    color = Color.FromArgb(56, 161, 105);
+                    break;
+                case SiteHealth.Down:
+                    color = Color.FromArgb(201, 68, 68);
+                    break;
+                default:
+                    return;
+            }
+
+            int size = 8;
+            int x = bounds.X + 26;
+            int y = bounds.Y + 15;
+
+            using (SolidBrush brush = new SolidBrush(color))
+            {
+                graphics.FillEllipse(brush, x, y, size, size);
+            }
+        }
+
         private void DrawFourButtons(Graphics graphics, Rectangle bounds, ButtonSpec first, ButtonSpec second, ButtonSpec third, ButtonSpec fourth)
         {
+            DrawButtons(graphics, bounds, first, second, third, fourth);
+        }
+
+        private void DrawFiveButtons(Graphics graphics, Rectangle bounds, ButtonSpec first, ButtonSpec second, ButtonSpec third, ButtonSpec fourth, ButtonSpec fifth)
+        {
+            DrawButtons(graphics, bounds, first, second, third, fourth, fifth);
+        }
+
+        private void DrawButtons(Graphics graphics, Rectangle bounds, params ButtonSpec[] specs)
+        {
+            int count = specs.Length;
+
+            if (count == 0)
+            {
+                return;
+            }
+
             int gap = bounds.Width < 260 ? 8 : 12;
             int buttonHeight = Math.Min(34, bounds.Height);
             int y = bounds.Y + Math.Max(0, (bounds.Height - buttonHeight) / 2);
-            int available = Math.Max(0, bounds.Width - (gap * 3));
-            int buttonWidth = available / 4;
+            int available = Math.Max(0, bounds.Width - (gap * (count - 1)));
+            int buttonWidth = available / count;
             int x = bounds.X;
 
-            DrawButton(graphics, new Rectangle(x, y, buttonWidth, buttonHeight), first.Text, first.Primary, first.Enabled, first.Key);
-            x += buttonWidth + gap;
-            DrawButton(graphics, new Rectangle(x, y, buttonWidth, buttonHeight), second.Text, second.Primary, second.Enabled, second.Key);
-            x += buttonWidth + gap;
-            DrawButton(graphics, new Rectangle(x, y, buttonWidth, buttonHeight), third.Text, third.Primary, third.Enabled, third.Key);
-            x += buttonWidth + gap;
-            DrawButton(graphics, new Rectangle(x, y, Math.Max(0, bounds.Right - x), buttonHeight), fourth.Text, fourth.Primary, fourth.Enabled, fourth.Key);
+            for (int index = 0; index < count; index++)
+            {
+                ButtonSpec spec = specs[index];
+                int width = index == count - 1 ? Math.Max(0, bounds.Right - x) : buttonWidth;
+
+                DrawButton(graphics, new Rectangle(x, y, width, buttonHeight), spec.Text, spec.Primary, spec.Enabled, spec.Key);
+                x += buttonWidth + gap;
+            }
         }
 
         private void DrawTwoButtons(Graphics graphics, Rectangle bounds, ButtonSpec first, ButtonSpec second)
@@ -874,6 +1247,10 @@ namespace LocalWebTrayShell
             else if (key == "cmd-delete")
             {
                 Raise(CommandActionRequested, new SidebarCommandActionEventArgs(SidebarCommandAction.Delete));
+            }
+            else if (key == "cmd-restart")
+            {
+                Raise(CommandActionRequested, new SidebarCommandActionEventArgs(SidebarCommandAction.Restart));
             }
             else if (key == "cmd-startstop")
             {

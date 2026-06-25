@@ -119,6 +119,45 @@ namespace LocalWebTrayShell
             }
         }
 
+        // Export a sanitized config to an arbitrary path (import/export feature).
+        public static void SaveTo(string path, AppConfig config)
+        {
+            config = Sanitize(config);
+            string directory = Path.GetDirectoryName(path);
+
+            if (!string.IsNullOrEmpty(directory))
+            {
+                Directory.CreateDirectory(directory);
+            }
+
+            using (FileStream stream = new FileStream(path, FileMode.Create, FileAccess.Write))
+            {
+                DataContractJsonSerializer serializer =
+                    new DataContractJsonSerializer(typeof(AppConfig));
+                serializer.WriteObject(stream, config);
+            }
+        }
+
+        // Import a config from an arbitrary path; returns null on failure.
+        public static AppConfig LoadFrom(string path)
+        {
+            try
+            {
+                using (FileStream stream = new FileStream(path, FileMode.Open, FileAccess.Read))
+                {
+                    DataContractJsonSerializer serializer =
+                        new DataContractJsonSerializer(typeof(AppConfig));
+                    AppConfig config = serializer.ReadObject(stream) as AppConfig;
+
+                    return config == null ? null : Sanitize(config);
+                }
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private static SiteEntry[] LoadLegacySites()
         {
             try
@@ -176,8 +215,56 @@ namespace LocalWebTrayShell
             {
                 Sites = SanitizeSites(config.Sites),
                 Commands = SanitizeCommands(config.Commands),
-                GlobalHotkey = SanitizeHotkey(config.GlobalHotkey)
+                GlobalHotkey = SanitizeHotkey(config.GlobalHotkey),
+                CommandSectionRatio = SanitizeRatio(config.CommandSectionRatio)
             };
+        }
+
+        public const double DefaultCommandSectionRatio = 0.42;
+
+        private static double SanitizeRatio(double ratio)
+        {
+            if (ratio < 0.20 || ratio > 0.80 || double.IsNaN(ratio) || double.IsInfinity(ratio))
+            {
+                return DefaultCommandSectionRatio;
+            }
+
+            return ratio;
+        }
+
+        private static EnvironmentVariableEntry[] SanitizeEnvironmentVariables(EnvironmentVariableEntry[] variables)
+        {
+            if (variables == null)
+            {
+                return new EnvironmentVariableEntry[0];
+            }
+
+            Dictionary<string, string> unique =
+                new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            List<EnvironmentVariableEntry> results = new List<EnvironmentVariableEntry>();
+
+            for (int index = 0; index < variables.Length; index++)
+            {
+                EnvironmentVariableEntry entry = variables[index];
+
+                if (entry == null || string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    continue;
+                }
+
+                unique[entry.Key.Trim()] = entry.Value ?? string.Empty;
+            }
+
+            foreach (KeyValuePair<string, string> pair in unique)
+            {
+                results.Add(new EnvironmentVariableEntry
+                {
+                    Key = pair.Key,
+                    Value = pair.Value
+                });
+            }
+
+            return results.ToArray();
         }
 
         private static HotkeyConfig SanitizeHotkey(HotkeyConfig config)
@@ -316,7 +403,11 @@ namespace LocalWebTrayShell
                     Command = command.Command.Trim(),
                     RunMode = RunModeCatalog.Normalize(command.RunMode),
                     EnabledOnStart = command.EnabledOnStart,
-                    AutoRetry = SanitizeAutoRetry(command.AutoRetry)
+                    AutoRetry = SanitizeAutoRetry(command.AutoRetry),
+                    WorkingDirectory = string.IsNullOrWhiteSpace(command.WorkingDirectory)
+                        ? null
+                        : command.WorkingDirectory.Trim(),
+                    EnvironmentVariables = SanitizeEnvironmentVariables(command.EnvironmentVariables)
                 });
             }
 

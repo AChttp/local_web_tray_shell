@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace LocalWebTrayShell
@@ -26,6 +27,21 @@ namespace LocalWebTrayShell
             {
                 return EmbeddedDependencyBootstrapper.RunSelfTest() ? 0 : 1;
             }
+
+            // Single-instance: a second launch exits silently. A second Switch.exe would
+            // otherwise hit the in-use WebView2 user-data folder and show a confusing error.
+            bool createdNew;
+            Mutex singleInstanceMutex = new Mutex(
+                true,
+                @"Local\SwitchShell-SingleInstance",
+                out createdNew);
+
+            if (!createdNew)
+            {
+                return 0;
+            }
+
+            GC.KeepAlive(singleInstanceMutex);
 
             try
             {

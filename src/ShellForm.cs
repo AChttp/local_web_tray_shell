@@ -109,6 +109,10 @@ namespace LocalWebTrayShell
         private HotkeyConfig pendingHotkey;
         private bool hotkeyRegistered;
         private ToolStripMenuItem trayHotkeyMenuItem;
+        private double pendingCommandSectionRatio;
+        private readonly object siteHealthSync;
+        private Dictionary<string, SiteHealth> siteHealth;
+        private System.Threading.Timer siteHealthTimer;
         private bool titleBarDragPending;
         private int sidebarDragStartX;
         private int sidebarDragStartWidth;
@@ -130,6 +134,8 @@ namespace LocalWebTrayShell
             commandManager = new CommandManager();
             commandManager.RuntimeChanged += OnCommandRuntimeChanged;
             runtimeRefreshSync = new object();
+            siteHealthSync = new object();
+            siteHealth = new Dictionary<string, SiteHealth>(StringComparer.OrdinalIgnoreCase);
             pendingRuntimeRefreshCommandIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             pendingLogRefreshCommandIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             siteViews = new Dictionary<string, SiteViewState>(StringComparer.OrdinalIgnoreCase);
@@ -137,6 +143,7 @@ namespace LocalWebTrayShell
             commands = new List<CommandEntry>(config.Commands ?? new CommandEntry[0]);
             commandManager.SyncCommands(commands);
             pendingHotkey = config.GlobalHotkey ?? HotkeyConstants.CreateDefault();
+            pendingCommandSectionRatio = config.CommandSectionRatio;
 
             workspaceMode = WorkspaceMode.Web;
 
@@ -231,6 +238,9 @@ namespace LocalWebTrayShell
             sidebarSurface.SiteActionRequested += OnSidebarSiteActionRequested;
             sidebarSurface.CommandReorderRequested += OnCommandReorderRequested;
             sidebarSurface.SiteReorderRequested += OnSiteReorderRequested;
+            sidebarSurface.CommandSectionRatioChanged += OnSidebarRatioChanged;
+            sidebarSurface.CommandSectionRatio = pendingCommandSectionRatio;
+            sidebarSurface.SiteHealthProvider = GetSiteHealth;
 
             sidebarSplitter = new SidebarSplitterPanel();
             sidebarSplitter.Dock = DockStyle.None;
@@ -393,7 +403,7 @@ namespace LocalWebTrayShell
             trayMenu.Items.Add("\u6253\u5f00\u4e3b\u754c\u9762", null, delegate { RestoreFromTray(); });
             trayMenu.Items.Add("\u663e\u793a\u63a7\u5236\u53f0", null, delegate { RestoreFromTray(); SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth); });
             trayMenu.Items.Add("\u5237\u65b0\u5f53\u524d\u9875\u9762", null, delegate { ReloadCurrentSite(); });
-            trayMenu.Items.Add("\u5168\u90e8\u505c\u6b62\u547d\u4ee4", null, delegate { commandManager.StopAll(); });
+            trayMenu.Items.Add("\u5168\u90e8\u505c\u6b62\u547d\u4ee4", null, delegate { ConfirmAndStopAll(); });
             trayStartupMenuItem = new ToolStripMenuItem("\u5f00\u673a\u81ea\u542f");
             trayStartupMenuItem.CheckOnClick = true;
             trayStartupMenuItem.Click += OnTrayStartupMenuClicked;
@@ -403,6 +413,9 @@ namespace LocalWebTrayShell
             trayHotkeyMenuItem.Click += OnConfigureHotkeyClicked;
             trayMenu.Items.Add(trayHotkeyMenuItem);
             UpdateHotkeyMenuText();
+
+            trayMenu.Items.Add("\u5bfc\u5165\u914d\u7f6e\u2026", null, delegate { ImportConfig(); });
+            trayMenu.Items.Add("\u5bfc\u51fa\u914d\u7f6e\u2026", null, delegate { ExportConfig(); });
 
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("\u9000\u51fa", null, delegate { ExitApplication(); });
@@ -459,6 +472,7 @@ namespace LocalWebTrayShell
                 SetTransientStatus("\u5de5\u4f5c\u53f0\u5df2\u5c31\u7eea\u3002");
                 SetWebState("\u7f51\u9875\u5de5\u4f5c\u533a\u5df2\u5c31\u7eea", "\u8bf7\u9009\u62e9\u4e00\u4e2a\u7ad9\u70b9\u6216\u7b49\u5f85\u9ed8\u8ba4\u7ad9\u70b9\u52a0\u8f7d\u3002", false);
                 uiRefreshTimer.Start();
+                RestartSiteHealthProbe();
 
                 if (commands.Count > 0)
                 {
@@ -816,6 +830,9 @@ namespace LocalWebTrayShell
                     break;
                 case SidebarCommandAction.Delete:
                     OnDeleteCommandClicked(sender, EventArgs.Empty);
+                    break;
+                case SidebarCommandAction.Restart:
+                    OnRestartCommandClicked(sender, EventArgs.Empty);
                     break;
                 case SidebarCommandAction.StartStop:
                     OnStartStopCommandClicked(sender, EventArgs.Empty);
@@ -1326,6 +1343,16 @@ namespace LocalWebTrayShell
             }
         }
 
+        private void OnRestartCommandClicked(object sender, EventArgs e)
+        {
+            if (currentCommand == null)
+            {
+                return;
+            }
+
+            commandManager.Restart(currentCommand.Id);
+        }
+
         private void OnAddSiteClicked(object sender, EventArgs e)
         {
             using (SiteDialog dialog = new SiteDialog(null))
@@ -1656,6 +1683,7 @@ namespace LocalWebTrayShell
 
             sidebarSurface.EditCommandEnabled = hasCommand;
             sidebarSurface.DeleteCommandEnabled = hasCommand && !isActive;
+            sidebarSurface.RestartCommandEnabled = hasCommand && !isBusy;
             sidebarSurface.StartStopCommandEnabled = hasCommand;
             sidebarSurface.StartStopCommandText = isActive ? "\u505c\u6b62" : "\u542f\u52a8";
 
@@ -1663,12 +1691,14 @@ namespace LocalWebTrayShell
             {
                 sidebarSurface.EditCommandEnabled = false;
                 sidebarSurface.DeleteCommandEnabled = false;
+                sidebarSurface.RestartCommandEnabled = false;
                 sidebarSurface.StartStopCommandEnabled = false;
                 sidebarSurface.StartStopCommandText = "\u542f\u52a8";
                 sidebarSurface.Invalidate();
                 return;
             }
 
+            sidebarSurface.RestartCommandEnabled = hasCommand && !isBusy;
             sidebarSurface.StartStopCommandText = isActive ? "\u505c\u6b62" : "\u542f\u52a8";
             sidebarSurface.Invalidate();
         }
@@ -2224,8 +2254,102 @@ namespace LocalWebTrayShell
             {
                 Sites = sites.ToArray(),
                 Commands = commands.ToArray(),
-                GlobalHotkey = pendingHotkey
+                GlobalHotkey = pendingHotkey,
+                CommandSectionRatio = sidebarSurface.CommandSectionRatio
             });
+        }
+
+        private void ExportConfig()
+        {
+            using (SaveFileDialog dialog = new SaveFileDialog())
+            {
+                dialog.Title = "导出配置";
+                dialog.Filter = "Switch 配置 (*.json)|*.json";
+                dialog.FileName = "switch-config.json";
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                try
+                {
+                    AppConfigStore.SaveTo(dialog.FileName, new AppConfig
+                    {
+                        Sites = sites.ToArray(),
+                        Commands = commands.ToArray(),
+                        GlobalHotkey = pendingHotkey,
+                        CommandSectionRatio = sidebarSurface.CommandSectionRatio
+                    });
+                    MessageBox.Show("配置已导出。", AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("导出配置失败。\r\n\r\n" + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
+        }
+
+        private void ImportConfig()
+        {
+            using (OpenFileDialog dialog = new OpenFileDialog())
+            {
+                dialog.Title = "导入配置";
+                dialog.Filter = "Switch 配置 (*.json)|*.json";
+
+                if (dialog.ShowDialog(this) != DialogResult.OK)
+                {
+                    return;
+                }
+
+                AppConfig loaded = AppConfigStore.LoadFrom(dialog.FileName);
+
+                if (loaded == null)
+                {
+                    MessageBox.Show("无法读取该配置文件。", AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    return;
+                }
+
+                if (MessageBox.Show(
+                        "导入将覆盖当前的站点、命令、快捷键和布局，确定继续吗？",
+                        AppName,
+                        MessageBoxButtons.YesNo,
+                        MessageBoxIcon.Warning) != DialogResult.Yes)
+                {
+                    return;
+                }
+
+                try
+                {
+                    sites.Clear();
+                    if (loaded.Sites != null)
+                    {
+                        sites.AddRange(loaded.Sites);
+                    }
+
+                    commands.Clear();
+                    if (loaded.Commands != null)
+                    {
+                        commands.AddRange(loaded.Commands);
+                    }
+
+                    commandManager.SyncCommands(commands);
+                    pendingHotkey = loaded.GlobalHotkey ?? HotkeyConstants.CreateDefault();
+                    sidebarSurface.CommandSectionRatio = loaded.CommandSectionRatio;
+
+                    PersistConfig();
+                    TryRegisterHotkey();
+                    UpdateHotkeyMenuText();
+                    RefreshCommandList();
+                    RefreshSiteList();
+                    RestartSiteHealthProbe();
+                    SetTransientStatus("配置已导入。");
+                }
+                catch (Exception ex)
+                {
+                    MessageBox.Show("导入配置失败。\r\n\r\n" + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
+                }
+            }
         }
 
         private void ApplyBadgeStyle(Label badge, CommandStatus status)
@@ -2465,6 +2589,25 @@ namespace LocalWebTrayShell
 
         private void OnStopAllCommandsClicked(object sender, EventArgs e)
         {
+            ConfirmAndStopAll();
+        }
+
+        private void ConfirmAndStopAll()
+        {
+            if (!commandManager.HasActiveOrPendingCommands())
+            {
+                return;
+            }
+
+            if (MessageBox.Show(
+                    "\u786e\u5b9a\u505c\u6b62\u6240\u6709\u6b63\u5728\u8fd0\u884c\u7684\u547d\u4ee4\u5417\uff1f",
+                    AppName,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Warning) != DialogResult.Yes)
+            {
+                return;
+            }
+
             commandManager.StopAll();
             SetTransientStatus("\u6b63\u5728\u505c\u6b62\u6240\u6709\u547d\u4ee4...");
         }
@@ -2653,6 +2796,115 @@ namespace LocalWebTrayShell
                 : "\u5feb\u6377\u952e\u8bbe\u7f6e\u2026";
         }
 
+        private void OnSidebarRatioChanged(object sender, EventArgs e)
+        {
+            PersistConfig();
+        }
+
+        private SiteHealth GetSiteHealth(string siteId)
+        {
+            if (string.IsNullOrEmpty(siteId))
+            {
+                return SiteHealth.Unknown;
+            }
+
+            lock (siteHealthSync)
+            {
+                SiteHealth health;
+                siteHealth.TryGetValue(siteId, out health);
+                return health;
+            }
+        }
+
+        private void RestartSiteHealthProbe()
+        {
+            if (siteHealthTimer != null)
+            {
+                siteHealthTimer.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite);
+            }
+
+            ProbeSiteHealth(null);
+            siteHealthTimer = new System.Threading.Timer(
+                ProbeSiteHealth,
+                null,
+                TimeSpan.FromSeconds(10),
+                TimeSpan.FromSeconds(10));
+        }
+
+        private void ProbeSiteHealth(object state)
+        {
+            // Capture the site list on the UI thread (it's only mutated there), then probe off-thread.
+            BeginInvoke(new Action(delegate
+            {
+                SiteEntry[] snapshot = sites.ToArray();
+
+                for (int index = 0; index < snapshot.Length; index++)
+                {
+                    ProbeSingleSite(snapshot[index]);
+                }
+            }));
+        }
+
+        private void ProbeSingleSite(SiteEntry site)
+        {
+            if (site == null || string.IsNullOrWhiteSpace(site.Url))
+            {
+                return;
+            }
+
+            System.Threading.ThreadPool.QueueUserWorkItem(delegate
+            {
+                SiteHealth health = ProbeUrl(site.Url);
+
+                lock (siteHealthSync)
+                {
+                    siteHealth[site.Id] = health;
+                }
+
+                try
+                {
+                    BeginInvoke(new Action(delegate { sidebarSurface.Invalidate(); }));
+                }
+                catch
+                {
+                }
+            });
+        }
+
+        // Lightweight HTTP probe using WebRequest (available via System.dll), so no extra
+        // assembly reference is needed. Treat any HTTP response (even non-2xx) as "up" --
+        // the server is listening. Connection refused / timeout / DNS => "down".
+        private static SiteHealth ProbeUrl(string url)
+        {
+            try
+            {
+                System.Net.WebRequest request = System.Net.WebRequest.Create(url);
+                request.Method = "HEAD";
+                request.Timeout = 3000;
+                request.Proxy = null;
+
+                using (System.Net.WebResponse response = request.GetResponse())
+                {
+                    return SiteHealth.Up;
+                }
+            }
+            catch (System.Net.WebException ex)
+            {
+                System.Net.WebResponse response = ex.Response;
+                if (response != null)
+                {
+                    response.Close();
+                    return SiteHealth.Up;
+                }
+
+                return SiteHealth.Down;
+            }
+            catch
+            {
+                return SiteHealth.Down;
+            }
+        }
+
         private void ExitApplication()
         {
             if (commandManager.HasActiveOrPendingCommands())
@@ -2726,7 +2978,9 @@ namespace LocalWebTrayShell
                     InitialDelaySeconds = command.AutoRetry == null ? 3 : command.AutoRetry.InitialDelaySeconds,
                     MaxDelaySeconds = command.AutoRetry == null ? 60 : command.AutoRetry.MaxDelaySeconds,
                     ResetAfterSeconds = command.AutoRetry == null ? 300 : command.AutoRetry.ResetAfterSeconds
-                }
+                },
+                WorkingDirectory = command.WorkingDirectory,
+                EnvironmentVariables = CloneEnvironmentVariables(command.EnvironmentVariables)
             };
         }
 
@@ -2737,6 +2991,30 @@ namespace LocalWebTrayShell
             target.RunMode = source.RunMode;
             target.EnabledOnStart = source.EnabledOnStart;
             target.AutoRetry = source.AutoRetry;
+            target.WorkingDirectory = source.WorkingDirectory;
+            target.EnvironmentVariables = CloneEnvironmentVariables(source.EnvironmentVariables);
+        }
+
+        private static EnvironmentVariableEntry[] CloneEnvironmentVariables(EnvironmentVariableEntry[] variables)
+        {
+            if (variables == null || variables.Length == 0)
+            {
+                return new EnvironmentVariableEntry[0];
+            }
+
+            EnvironmentVariableEntry[] clone = new EnvironmentVariableEntry[variables.Length];
+
+            for (int index = 0; index < variables.Length; index++)
+            {
+                EnvironmentVariableEntry entry = variables[index];
+                clone[index] = new EnvironmentVariableEntry
+                {
+                    Key = entry == null ? null : entry.Key,
+                    Value = entry == null ? null : entry.Value
+                };
+            }
+
+            return clone;
         }
 
         private ThemedButton CreatePrimaryButton(string text, int x, int y, int width)
@@ -2828,6 +3106,12 @@ namespace LocalWebTrayShell
                 }
 
                 siteViews.Clear();
+
+                if (siteHealthTimer != null)
+                {
+                    siteHealthTimer.Dispose();
+                    siteHealthTimer = null;
+                }
             }
 
             base.Dispose(disposing);

@@ -15,6 +15,9 @@ namespace LocalWebTrayShell
 
         [DataMember(Name = "global_hotkey")]
         public HotkeyConfig GlobalHotkey { get; set; }
+
+        [DataMember(Name = "command_section_ratio")]
+        public double CommandSectionRatio { get; set; }
     }
 
     [DataContract]
@@ -50,6 +53,22 @@ namespace LocalWebTrayShell
 
         [DataMember(Name = "auto_retry")]
         public AutoRetryConfig AutoRetry { get; set; }
+
+        [DataMember(Name = "working_directory")]
+        public string WorkingDirectory { get; set; }
+
+        [DataMember(Name = "environment_variables")]
+        public EnvironmentVariableEntry[] EnvironmentVariables { get; set; }
+    }
+
+    [DataContract]
+    internal sealed class EnvironmentVariableEntry
+    {
+        [DataMember(Name = "key")]
+        public string Key { get; set; }
+
+        [DataMember(Name = "value")]
+        public string Value { get; set; }
     }
 
     [DataContract]
@@ -180,6 +199,13 @@ namespace LocalWebTrayShell
                 Key = DefaultKey
             };
         }
+    }
+
+    internal enum SiteHealth
+    {
+        Unknown,
+        Up,
+        Down
     }
 
     internal enum CommandStatus

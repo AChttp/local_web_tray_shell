@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Windows.Forms;
 
 namespace LocalWebTrayShell
@@ -299,6 +301,9 @@ namespace LocalWebTrayShell
         private readonly NumericUpDown initialDelayUpDown;
         private readonly NumericUpDown maxDelayUpDown;
         private readonly NumericUpDown resetAfterUpDown;
+        private readonly TextBox workingDirectoryTextBox;
+        private readonly ThemedButton browseButton;
+        private readonly TextBox environmentTextBox;
         private readonly ThemedButton saveButton;
         private readonly ThemedButton cancelButton;
 
@@ -308,18 +313,22 @@ namespace LocalWebTrayShell
                 ? AppConfigStore.CreateDefaultAutoRetry()
                 : initial.AutoRetry;
 
-            DialogUi.StyleForm(this, initial == null ? "\u65b0\u589e\u547d\u4ee4" : "\u7f16\u8f91\u547d\u4ee4", new Size(660, 610));
+            DialogUi.StyleForm(this, initial == null ? "\u65b0\u589e\u547d\u4ee4" : "\u7f16\u8f91\u547d\u4ee4", new Size(660, 800));
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
-            layout.RowCount = 8;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 132f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 16f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 178f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowCount = 12;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 0  name label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));   // 1  name input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 2  command label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116f));  // 3  command input (multiline)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 16f));   // 4  spacer
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70f));   // 5  options panel
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 6  working dir label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));   // 7  working dir input + browse
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 8  environment label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));   // 9  environment input (multiline)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 150f));  // 10 retry panel
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // 11 footer
 
             nameTextBox = DialogUi.CreateTextBox(false);
             commandTextBox = DialogUi.CreateTextBox(true);
@@ -341,6 +350,17 @@ namespace LocalWebTrayShell
             maxDelayUpDown = DialogUi.CreateNumeric(1, 3600);
             resetAfterUpDown = DialogUi.CreateNumeric(1, 86400);
 
+            workingDirectoryTextBox = DialogUi.CreateTextBox(false);
+            browseButton = new ThemedButton();
+            browseButton.Text = "\u6d4f\u89c8...";
+            browseButton.Size = new Size(80, 30);
+            UiTheme.StyleSecondaryButton(browseButton);
+            browseButton.Click += OnBrowseWorkingDirectoryClicked;
+
+            environmentTextBox = DialogUi.CreateTextBox(true);
+            environmentTextBox.AcceptsReturn = true;
+            environmentTextBox.ScrollBars = ScrollBars.Vertical;
+
             saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
 
@@ -349,8 +369,12 @@ namespace LocalWebTrayShell
             layout.Controls.Add(DialogUi.CreateLabel("\u547d\u4ee4"), 0, 2);
             layout.Controls.Add(DialogUi.CreateInputFrame(commandTextBox, true), 0, 3);
             layout.Controls.Add(CreateCommandOptionsPanel(), 0, 5);
-            layout.Controls.Add(CreateRetryPanel(), 0, 6);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 7);
+            layout.Controls.Add(DialogUi.CreateLabel("\u5de5\u4f5c\u76ee\u5f55"), 0, 6);
+            layout.Controls.Add(CreateWorkingDirectoryPanel(), 0, 7);
+            layout.Controls.Add(DialogUi.CreateLabel("\u73af\u5883\u53d8\u91cf\uff08\u6bcf\u884c KEY=VALUE\uff09"), 0, 8);
+            layout.Controls.Add(DialogUi.CreateInputFrame(environmentTextBox, true), 0, 9);
+            layout.Controls.Add(CreateRetryPanel(), 0, 10);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 11);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -365,11 +389,15 @@ namespace LocalWebTrayShell
                     Command = initial.Command,
                     RunMode = initial.RunMode,
                     EnabledOnStart = initial.EnabledOnStart,
-                    AutoRetry = initial.AutoRetry
+                    AutoRetry = initial.AutoRetry,
+                    WorkingDirectory = initial.WorkingDirectory,
+                    EnvironmentVariables = CloneEnvironmentVariables(initial.EnvironmentVariables)
                 };
                 nameTextBox.Text = initial.Name;
                 commandTextBox.Text = initial.Command;
                 enabledOnStartCheckBox.Checked = initial.EnabledOnStart;
+                workingDirectoryTextBox.Text = initial.WorkingDirectory ?? string.Empty;
+                environmentTextBox.Text = FormatEnvironmentVariables(initial.EnvironmentVariables);
             }
 
             if (RunModeCatalog.Normalize(initial == null ? null : initial.RunMode) == RunModeCatalog.Cmd)
@@ -397,7 +425,136 @@ namespace LocalWebTrayShell
                 commandTextBox.ReadOnly = true;
                 commandTextBox.BackColor = UiTheme.SecondaryDisabled;
                 runModeComboBox.Enabled = false;
+                workingDirectoryTextBox.ReadOnly = true;
+                workingDirectoryTextBox.BackColor = UiTheme.SecondaryDisabled;
+                browseButton.Enabled = false;
+                environmentTextBox.ReadOnly = true;
+                environmentTextBox.BackColor = UiTheme.SecondaryDisabled;
             }
+        }
+
+        private Control CreateWorkingDirectoryPanel()
+        {
+            TableLayoutPanel panel = new TableLayoutPanel();
+            panel.Dock = DockStyle.Fill;
+            panel.Margin = new Padding(0);
+            panel.Padding = new Padding(0);
+            panel.BackColor = UiTheme.WindowBackground;
+            panel.ColumnCount = 2;
+            panel.RowCount = 1;
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+
+            Control frame = DialogUi.CreateInputFrame(workingDirectoryTextBox, false);
+            frame.Dock = DockStyle.Fill;
+            frame.Margin = new Padding(0);
+
+            browseButton.Dock = DockStyle.Fill;
+            browseButton.Margin = new Padding(8, 0, 0, 0);
+
+            panel.Controls.Add(frame, 0, 0);
+            panel.Controls.Add(browseButton, 1, 0);
+            return panel;
+        }
+
+        private void OnBrowseWorkingDirectoryClicked(object sender, EventArgs e)
+        {
+            using (FolderBrowserDialog dialog = new FolderBrowserDialog())
+            {
+                dialog.Description = "\u9009\u62e9\u547d\u4ee4\u7684\u5de5\u4f5c\u76ee\u5f55";
+                string current = workingDirectoryTextBox.Text;
+
+                if (!string.IsNullOrWhiteSpace(current) && Directory.Exists(current.Trim()))
+                {
+                    dialog.SelectedPath = current.Trim();
+                }
+
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                {
+                    workingDirectoryTextBox.Text = dialog.SelectedPath;
+                }
+            }
+        }
+
+        private static EnvironmentVariableEntry[] CloneEnvironmentVariables(EnvironmentVariableEntry[] variables)
+        {
+            if (variables == null)
+            {
+                return new EnvironmentVariableEntry[0];
+            }
+
+            EnvironmentVariableEntry[] clone = new EnvironmentVariableEntry[variables.Length];
+
+            for (int index = 0; index < variables.Length; index++)
+            {
+                EnvironmentVariableEntry entry = variables[index];
+                clone[index] = new EnvironmentVariableEntry
+                {
+                    Key = entry == null ? null : entry.Key,
+                    Value = entry == null ? null : entry.Value
+                };
+            }
+
+            return clone;
+        }
+
+        private static string FormatEnvironmentVariables(EnvironmentVariableEntry[] variables)
+        {
+            if (variables == null || variables.Length == 0)
+            {
+                return string.Empty;
+            }
+
+            System.Text.StringBuilder builder = new System.Text.StringBuilder();
+
+            for (int index = 0; index < variables.Length; index++)
+            {
+                EnvironmentVariableEntry entry = variables[index];
+
+                if (entry == null || string.IsNullOrWhiteSpace(entry.Key))
+                {
+                    continue;
+                }
+
+                builder.Append(entry.Key).Append('=').Append(entry.Value ?? string.Empty)
+                    .Append(Environment.NewLine);
+            }
+
+            return builder.ToString();
+        }
+
+        private static EnvironmentVariableEntry[] ParseEnvironmentVariables(string text)
+        {
+            List<EnvironmentVariableEntry> results = new List<EnvironmentVariableEntry>();
+            string[] lines = (text ?? string.Empty).Split(
+                new[] { "\r\n", "\n" },
+                StringSplitOptions.RemoveEmptyEntries);
+
+            for (int index = 0; index < lines.Length; index++)
+            {
+                string line = lines[index].Trim();
+
+                if (string.IsNullOrEmpty(line) || line.StartsWith("#"))
+                {
+                    continue;
+                }
+
+                int separator = line.IndexOf('=');
+
+                if (separator <= 0)
+                {
+                    continue;
+                }
+
+                results.Add(new EnvironmentVariableEntry
+                {
+                    Key = line.Substring(0, separator).Trim(),
+                    Value = line.Substring(separator + 1)
+                });
+            }
+
+            return results.ToArray();
         }
 
         public CommandEntry Result { get; private set; }
@@ -543,6 +700,10 @@ namespace LocalWebTrayShell
                 MaxDelaySeconds = (int)maxDelayUpDown.Value,
                 ResetAfterSeconds = (int)resetAfterUpDown.Value
             };
+            Result.WorkingDirectory = workingDirectoryTextBox.Text == null
+                ? null
+                : workingDirectoryTextBox.Text.Trim();
+            Result.EnvironmentVariables = ParseEnvironmentVariables(environmentTextBox.Text);
 
             DialogResult = DialogResult.OK;
             Close();
