@@ -125,6 +125,8 @@ namespace LocalWebTrayShell
         private string renderedLogCommandId;
         private int renderedLogFirstSequence;
         private int renderedLogNextSequence;
+        private string cachedStartupEnabledText;
+        private string lastTrayTooltipText;
 
         public ShellForm()
         {
@@ -400,6 +402,8 @@ namespace LocalWebTrayShell
             Controls.Add(titleBarPanel);
 
             trayMenu = new ContextMenuStrip();
+            trayMenu.Opening += delegate { AppLogger.Info("tray", "托盘菜单打开"); };
+            trayMenu.Closed += delegate(object sender, ToolStripDropDownClosedEventArgs e) { AppLogger.Info("tray", "托盘菜单关闭 reason=" + e.CloseReason); };
             trayMenu.Items.Add("\u6253\u5f00\u4e3b\u754c\u9762", null, delegate { RestoreFromTray(); });
             trayMenu.Items.Add("\u663e\u793a\u63a7\u5236\u53f0", null, delegate { RestoreFromTray(); SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth); });
             trayMenu.Items.Add("\u5237\u65b0\u5f53\u524d\u9875\u9762", null, delegate { ReloadCurrentSite(); });
@@ -417,6 +421,7 @@ namespace LocalWebTrayShell
             trayMenu.Items.Add("\u5bfc\u5165\u914d\u7f6e\u2026", null, delegate { ImportConfig(); });
             trayMenu.Items.Add("\u5bfc\u51fa\u914d\u7f6e\u2026", null, delegate { ExportConfig(); });
 
+            trayMenu.Items.Add("\u6253\u5f00\u65e5\u5fd7\u6587\u4ef6\u5939", null, delegate { OpenLogFolder(); });
             trayMenu.Items.Add(new ToolStripSeparator());
             trayMenu.Items.Add("\u9000\u51fa", null, delegate { ExitApplication(); });
 
@@ -465,10 +470,12 @@ namespace LocalWebTrayShell
         {
             try
             {
+                AppLogger.Info("startup", "\u5f00\u59cb\u521d\u59cb\u5316 WebView2 \u8fd0\u884c\u73af\u5883");
                 webViewEnvironment = await CoreWebView2Environment.CreateAsync(
                     null,
                     AppPaths.WebViewUserDataDirectory);
 
+                AppLogger.Info("startup", "WebView2 \u5c31\u7eea\uff0c\u7ad9\u70b9 " + sites.Count + " \u4e2a\uff0c\u547d\u4ee4 " + commands.Count + " \u4e2a\uff0c\u81ea\u542f\u547d\u4ee4 " + CountEnabledOnStart());
                 SetTransientStatus("\u5de5\u4f5c\u53f0\u5df2\u5c31\u7eea\u3002");
                 SetWebState("\u7f51\u9875\u5de5\u4f5c\u533a\u5df2\u5c31\u7eea", "\u8bf7\u9009\u62e9\u4e00\u4e2a\u7ad9\u70b9\u6216\u7b49\u5f85\u9ed8\u8ba4\u7ad9\u70b9\u52a0\u8f7d\u3002", false);
                 uiRefreshTimer.Start();
@@ -492,6 +499,7 @@ namespace LocalWebTrayShell
             }
             catch (Exception ex)
             {
+                AppLogger.Error("startup", "WebView2 \u521d\u59cb\u5316\u5931\u8d25", ex);
                 SetTransientStatus("WebView2 \u521d\u59cb\u5316\u5931\u8d25\u3002");
                 SetWebState("WebView2 \u521d\u59cb\u5316\u5931\u8d25", ex.Message, false);
                 MessageBox.Show(
@@ -609,6 +617,16 @@ namespace LocalWebTrayShell
 
         private void OnUiRefreshTimerTick(object sender, EventArgs e)
         {
+            // While the tray context menu is open the UI thread runs inside the menu's
+            // modal loop; Explorer side is paused on our menu callback. Doing periodic
+            // UI work here (in particular anything that talks to Explorer or the
+            // registry) risks wedging the loop. The next tick after the menu closes
+            // catches everything up.
+            if (trayMenu.Visible)
+            {
+                return;
+            }
+
             RefreshCommandCardsState();
             RefreshCommandButtons();
             if (workspaceMode == WorkspaceMode.Logs)
@@ -686,6 +704,11 @@ namespace LocalWebTrayShell
 
         private void OnRuntimeRefreshTimerTick(object sender, EventArgs e)
         {
+            if (trayMenu.Visible)
+            {
+                return;
+            }
+
             FlushPendingRuntimeRefresh();
         }
 
@@ -1019,6 +1042,7 @@ namespace LocalWebTrayShell
             }
             catch (Exception ex)
             {
+                AppLogger.Error("web", "打开站点失败: " + site.Name + " " + site.Url, ex);
                 state.InitializationStarted = false;
                 SetTransientStatus("\u65e0\u6cd5\u6253\u5f00 " + site.Name);
                 SetWebState("\u65e0\u6cd5\u6253\u5f00 " + site.Name, ex.Message, true);
@@ -1118,6 +1142,8 @@ namespace LocalWebTrayShell
             else
             {
                 state.SuppressNextHistoryEntry = false;
+                AppLogger.Warn("web", "站点页面加载失败: " + state.Site.Name + " " + navigationUrl +
+                    " 错误=" + e.WebErrorStatus);
             }
 
             SetTransientStatus(e.IsSuccess
@@ -2178,9 +2204,7 @@ namespace LocalWebTrayShell
         {
             int running = commandManager.GetRunningCount();
             int waitingRetry = commandManager.GetWaitingRetryCount();
-            string startupText = WindowsStartupManager.IsEnabled()
-                ? "\u5df2\u542f\u7528\u81ea\u542f"
-                : "\u672a\u542f\u7528\u81ea\u542f";
+            string startupText = GetCachedStartupText();
 
             sidebarSurface.SummaryText =
                 "\u547d\u4ee4 " + commands.Count + " \u4e2a\uff0c\u8fd0\u884c\u4e2d " +
@@ -2189,7 +2213,20 @@ namespace LocalWebTrayShell
                 sites.Count + " \u4e2a\uff0c" +
                 startupText + "\u3002";
             sidebarSurface.Invalidate();
-            notifyIcon.Text = AppName + " - \u8fd0\u884c\u4e2d " + running + "/" + commands.Count;
+
+            // Updating NotifyIcon.Text issues a synchronous Shell_NotifyIcon call into
+            // Explorer. If the tray context menu is open, Explorer is blocked in our menu
+            // callback, so this cross-process call can deadlock the whole UI thread -- the
+            // classic "tray menu frozen, clicks dead, desktop sluggish, 0% CPU" hang.
+            // Skip tooltip updates while the menu is up, and skip no-op writes otherwise.
+            string trayText = AppName + " - \u8fd0\u884c\u4e2d " + running + "/" + commands.Count;
+            if (notifyIcon.Visible &&
+                !trayMenu.Visible &&
+                !string.Equals(lastTrayTooltipText, trayText, StringComparison.Ordinal))
+            {
+                lastTrayTooltipText = trayText;
+                notifyIcon.Text = trayText;
+            }
 
             if (DateTime.UtcNow >= statusSummaryHoldUntilUtc)
             {
@@ -2197,6 +2234,36 @@ namespace LocalWebTrayShell
                     "\uff0c\u7b49\u5f85\u91cd\u8bd5 " + waitingRetry +
                     "\uff0c\u7ad9\u70b9 " + sites.Count + "\u3002";
             }
+        }
+
+        // Reading HKCU\...\Run hits the registry synchronously. On machines with
+        // registry-filtering software (AV / device management) that read can stall
+        // indefinitely at 0% CPU, freezing whatever thread calls it. The UI thread used
+        // to do this every second via UpdateStatusSummary -- including while the tray
+        // menu's modal loop was running. Cache the value and refresh it only when the
+        // user toggles the menu item or the window state changes.
+        private string GetCachedStartupText()
+        {
+            if (cachedStartupEnabledText == null)
+            {
+                try
+                {
+                    cachedStartupEnabledText = WindowsStartupManager.IsEnabled()
+                        ? "\u5df2\u542f\u7528\u81ea\u542f"
+                        : "\u672a\u542f\u7528\u81ea\u542f";
+                }
+                catch
+                {
+                    cachedStartupEnabledText = "\u672a\u542f\u7528\u81ea\u542f";
+                }
+            }
+
+            return cachedStartupEnabledText;
+        }
+
+        private void RefreshCachedStartupText()
+        {
+            cachedStartupEnabledText = null;
         }
 
         private void SetTransientStatus(string message)
@@ -2306,6 +2373,7 @@ namespace LocalWebTrayShell
 
                 if (loaded == null)
                 {
+                    AppLogger.Warn("config", "导入失败：无法读取 " + dialog.FileName);
                     MessageBox.Show("无法读取该配置文件。", AppName, MessageBoxButtons.OK, MessageBoxIcon.Warning);
                     return;
                 }
@@ -2344,9 +2412,13 @@ namespace LocalWebTrayShell
                     RefreshSiteList();
                     RestartSiteHealthProbe();
                     SetTransientStatus("配置已导入。");
+                    AppLogger.Info("config", "配置已导入: " + dialog.FileName + "（站点 " +
+                        (loaded.Sites == null ? 0 : loaded.Sites.Length) + " 个，命令 " +
+                        (loaded.Commands == null ? 0 : loaded.Commands.Length) + " 个）");
                 }
                 catch (Exception ex)
                 {
+                    AppLogger.Error("config", "导入配置失败: " + dialog.FileName, ex);
                     MessageBox.Show("导入配置失败。\r\n\r\n" + ex.Message, AppName, MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
@@ -2569,6 +2641,7 @@ namespace LocalWebTrayShell
             try
             {
                 WindowsStartupManager.SetEnabled(trayStartupMenuItem.Checked);
+                RefreshCachedStartupText();
                 UpdateStatusSummary();
                 SetTransientStatus(trayStartupMenuItem.Checked
                     ? "\u5df2\u5f00\u542f\u5f00\u673a\u81ea\u542f\u3002"
@@ -2619,6 +2692,7 @@ namespace LocalWebTrayShell
                 e.CloseReason == CloseReason.WindowsShutDown ||
                 e.CloseReason == CloseReason.TaskManagerClosing)
             {
+                AppLogger.Info("exit", "FormClosing reason=" + e.CloseReason + "，停止计时器并释放命令管理器");
                 notifyIcon.Visible = false;
                 uiRefreshTimer.Stop();
                 runtimeRefreshTimer.Stop();
@@ -2666,6 +2740,7 @@ namespace LocalWebTrayShell
             preTrayWindowState = WindowState == FormWindowState.Minimized
                 ? FormWindowState.Normal
                 : WindowState;
+            AppLogger.Info("tray", "隐藏到托盘（原状态 " + preTrayWindowState + "）");
             Hide();
 
             if (trayHintShown)
@@ -2685,6 +2760,7 @@ namespace LocalWebTrayShell
             hidingToTray = false;
             if (!Visible)
             {
+                AppLogger.Info("tray", "从托盘恢复主界面");
                 if (WindowState == FormWindowState.Minimized)
                 {
                     WindowState = preTrayWindowState;
@@ -2724,6 +2800,7 @@ namespace LocalWebTrayShell
             }
 
             hotkeyRegistered = false;
+            AppLogger.Warn("hotkey", "\u5168\u5c40\u5feb\u6377\u952e\u6ce8\u518c\u5931\u8d25\uff08\u53ef\u80fd\u88ab\u5360\u7528\uff09: " + pendingHotkey.ToDisplayString());
             SetTransientStatus("\u5168\u5c40\u5feb\u6377\u952e\u6ce8\u518c\u5931\u8d25\uff1a\u53ef\u80fd\u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\u3002");
 
             if (notifyIcon != null && notifyIcon.Visible)
@@ -2855,10 +2932,18 @@ namespace LocalWebTrayShell
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
                 SiteHealth health = ProbeUrl(site.Url);
+                SiteHealth previous;
 
                 lock (siteHealthSync)
                 {
+                    siteHealth.TryGetValue(site.Id, out previous);
                     siteHealth[site.Id] = health;
+                }
+
+                if (previous != health)
+                {
+                    AppLogger.Info("health", "站点健康状态变化: " + site.Name + " " + site.Url +
+                        " " + previous + " -> " + health);
                 }
 
                 try
@@ -2907,6 +2992,7 @@ namespace LocalWebTrayShell
 
         private void ExitApplication()
         {
+            AppLogger.Info("exit", "用户请求退出");
             if (commandManager.HasActiveOrPendingCommands())
             {
                 if (MessageBox.Show(
@@ -2923,7 +3009,45 @@ namespace LocalWebTrayShell
 
             allowExit = true;
             notifyIcon.Visible = false;
+            AppLogger.Info("exit", "开始关闭，停止命令并退出");
             Close();
+        }
+
+        private int CountEnabledOnStart()
+        {
+            int count = 0;
+
+            for (int index = 0; index < commands.Count; index++)
+            {
+                if (commands[index] != null && commands[index].EnabledOnStart)
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private void OpenLogFolder()
+        {
+            try
+            {
+                System.IO.Directory.CreateDirectory(AppLogger.LogDirectory);
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = AppLogger.LogDirectory,
+                    UseShellExecute = true
+                });
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Error("logs", "无法打开日志文件夹", ex);
+                MessageBox.Show(
+                    "无法打开日志文件夹。\r\n\r\n" + AppLogger.LogDirectory + "\r\n\r\n" + ex.Message,
+                    AppName,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+            }
         }
 
         private bool ContainsSiteUrl(string url, string ignoredSiteId)

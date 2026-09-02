@@ -33,11 +33,12 @@ namespace LocalWebTrayShell
                     config = serializer.ReadObject(stream) as AppConfig;
                 }
             }
-            catch
+            catch (Exception ex)
             {
                 // The config on disk is unreadable. Keep running with defaults, but
                 // preserve the bad file as a backup so the user can recover it --
                 // otherwise the next Save() would silently overwrite it with defaults.
+                AppLogger.Warn("config", "配置文件损坏，已备份并使用默认配置: " + ex.Message);
                 BackupCorruptConfig();
                 config = CreateDefaultConfig();
             }
@@ -85,8 +86,9 @@ namespace LocalWebTrayShell
                     File.Move(tempPath, AppPaths.ConfigPath);
                 }
             }
-            catch
+            catch (Exception ex)
             {
+                AppLogger.Warn("config", "配置保存失败（原子替换），原文件已保留: " + ex.Message);
                 // If the atomic move failed, fall back to leaving the existing file intact
                 // rather than risking a partial write. Best-effort cleanup of the temp file.
                 try

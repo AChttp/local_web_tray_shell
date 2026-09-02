@@ -403,6 +403,7 @@ namespace LocalWebTrayShell
         {
             CommandEntry command;
             Process process = null;
+            string startInfoWorkingDirectory = null;
 
             lock (syncRoot)
             {
@@ -442,6 +443,7 @@ namespace LocalWebTrayShell
             {
                 process = new Process();
                 process.StartInfo = BuildStartInfo(command);
+                startInfoWorkingDirectory = process.StartInfo.WorkingDirectory;
                 process.EnableRaisingEvents = true;
                 process.OutputDataReceived += delegate(object sender, DataReceivedEventArgs e)
                 {
@@ -489,12 +491,18 @@ namespace LocalWebTrayShell
                     AddLogLocked(runtimes[commandId], "Process started, PID=" + process.Id + ".");
                 }
 
+                AppLogger.Info("cmd", "命令已启动: " + command.Name + " PID=" + process.Id +
+                    (fromRetry ? "（重试）" : string.Empty) + " cwd=" + startInfoWorkingDirectory +
+                    " mode=" + RunModeCatalog.GetDisplayName(command.RunMode));
+
                 RaiseRuntimeChanged(commandId);
             }
             catch (Exception ex)
             {
                 bool scheduledRetry;
                 Process processToDispose = process;
+
+                AppLogger.Error("cmd", "命令启动失败: " + command.Name + " (" + command.Command + ")", ex);
 
                 lock (syncRoot)
                 {
@@ -605,6 +613,11 @@ namespace LocalWebTrayShell
             bool restartNow = false;
             int? returnCode = null;
             Process processToDispose = null;
+            string logCommandName = commandId;
+            string logExitDescription = "未知";
+            bool logRetryScheduled = false;
+            int logRetryAttempts = 0;
+            DateTime? logRetryDelay = null;
 
             try
             {
@@ -651,6 +664,7 @@ namespace LocalWebTrayShell
                     runtime.RetryAttempts = 0;
                     AddLogLocked(runtime, "Process stopped. Restarting.");
                     restartNow = true;
+                    logExitDescription = "停止（重启请求）";
                 }
                 else if (runtime.StopRequested)
                 {
@@ -658,17 +672,20 @@ namespace LocalWebTrayShell
                     runtime.Status = CommandStatus.Stopped;
                     runtime.RetryAttempts = 0;
                     AddLogLocked(runtime, "Process stopped, exit code=" + FormatReturnCode(returnCode) + ".");
+                    logExitDescription = "停止（用户请求）";
                 }
                 else if (returnCode.GetValueOrDefault() == 0)
                 {
                     runtime.Status = CommandStatus.Stopped;
                     runtime.RetryAttempts = 0;
                     AddLogLocked(runtime, "Process exited normally, exit code=0.");
+                    logExitDescription = "正常退出";
                 }
                 else
                 {
                     runtime.Status = CommandStatus.Error;
                     AddLogLocked(runtime, "Process exited unexpectedly, exit code=" + FormatReturnCode(returnCode) + ".");
+                    logExitDescription = "异常退出";
 
                     if (runtime.Command != null &&
                         runtime.StartedAtUtc.HasValue &&
@@ -680,7 +697,21 @@ namespace LocalWebTrayShell
 
                     ScheduleRetryLocked(runtime);
                 }
+
+                logCommandName = runtime.Command == null ? commandId : runtime.Command.Name;
+                logRetryScheduled = runtime.Status == CommandStatus.WaitingRetry;
+                logRetryAttempts = runtime.RetryAttempts;
+                logRetryDelay = runtime.RetryDueAtUtc;
             }
+
+            AppLogger.Info("cmd", "命令退出: " + logCommandName + " PID=" + GetProcessId(process) +
+                " " + logExitDescription + " 退出码=" + FormatReturnCode(returnCode) +
+                (logRetryScheduled
+                    ? " 已安排重试: 第 " + logRetryAttempts + " 次，" +
+                      (logRetryDelay.HasValue
+                          ? Math.Max(0, (int)(logRetryDelay.Value - DateTime.UtcNow).TotalSeconds) + "s 后"
+                          : "?")
+                    : string.Empty));
 
             DisposeProcessSafely(processToDispose);
             RaiseRuntimeChanged(commandId);
@@ -878,6 +909,7 @@ namespace LocalWebTrayShell
 
         private void QueueProcessTreeKill(string commandId, int processId)
         {
+            AppLogger.Info("cmd", "结束进程树 PID=" + processId + "（命令 " + commandId + "）");
             ThreadPool.QueueUserWorkItem(
                 delegate
                 {
@@ -897,10 +929,12 @@ namespace LocalWebTrayShell
                             };
                             killer.Start();
                             killer.WaitForExit(5000);
+                            AppLogger.Info("cmd", "taskkill PID=" + processId + " 退出码=" + killer.ExitCode);
                         }
                     }
                     catch (Exception ex)
                     {
+                        AppLogger.Error("cmd", "结束进程树失败 PID=" + processId, ex);
                         AppendLog(commandId, "Failed to stop process tree: " + ex.Message);
                     }
                 });
