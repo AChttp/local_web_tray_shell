@@ -2,6 +2,41 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-09-02 - v1.0.6 Stability Release (Freeze Fixes + Session Logging)
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.6`
+2. Updated in-code version constant:
+   - `src\Program.cs` `AppVersion` (drives the session-log header)
+3. Updated release documentation:
+   - `README.md`（版本号 + 新增"程序日志"章节）
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.6.md`
+4. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+5. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+6. Smoke-tested the build: launched, verified session log header reports `Version=1.0.6`, auto-retry commands back off correctly (attempt 4 -> 24s, no zero-delay retries), UI responsive.
+7. Release preparation commit:
+   - Commit: `db7a147`
+   - Message: `Prepare v1.0.6 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.6`
+
+### GitHub Release Publication
+
+1. Create GitHub Release for tag:
+   - `v1.0.6`
+2. Upload release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.6-win-x64.zip`
+
 ## 2026-06-25 - v1.0.5 Correctness Fixes and Sidebar/Usability Improvements Release
 
 ### Versioning and Release Preparation
