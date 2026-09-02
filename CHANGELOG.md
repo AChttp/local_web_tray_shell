@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.6 - 2026-09-02
+
+Stability release focused on two freeze fixes and a new session logging system.
+
+### Added
+
+- Application logging: one file per session under `%LocalAppData%\SwitchShell\logs` (e.g. `switch-20260902-143404-pid93636.log`), every line flushed to disk as written so nothing is lost even on a hard hang or crash. Thread-safe, never throws, 4MB per-file rotation, keeps the last 12 sessions.
+- Logged events: session header (pid/version/OS), WebView2 init success/failure, command start/exit/retry-scheduled (with PID, exit code, retry attempt number and delay), restart, taskkill results, site navigation failures, site health transitions, tray menu open/close, hide/restore from tray, hotkey registration failure, config corrupt/import events, exit path, and global unhandled exceptions with stack traces.
+- "打开日志文件夹" tray menu item that opens the log directory in Explorer.
+
+### Fixed
+
+- Fixed the intermittent tray right-click menu freeze ("menu cannot be clicked, clicking elsewhere does nothing, whole desktop sluggish, 0% CPU"). While the tray context menu's modal loop was running, the UI thread still read the startup registry key every second and wrote the tray tooltip via a synchronous `Shell_NotifyIcon` call into Explorer on every running-count change — a deadlock when Explorer is blocked on our menu callback. The registry value is now cached, tooltip writes are skipped while the menu is open (and when unchanged), and both UI refresh timers skip their tick while the menu is open.
+- Fixed a UI freeze caused by an integer overflow in the auto-retry backoff. The delay was computed as `initialDelay * 2^(attempt-1)` and cast to `int` before being clamped, so around attempt 31 the value wrapped negative and the retry timer fired immediately, producing a 0-second restart storm (~3.5 process spawns/second) that flooded the UI message queue. The backoff now clamps in floating point before the cast and floors at 1 second, so retries cap at the configured max delay forever.
+
 ## v1.0.5 - 2026-06-25
 
 Maintenance release focused on audit-driven correctness fixes and sidebar/usability improvements.
