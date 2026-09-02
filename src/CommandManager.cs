@@ -748,6 +748,16 @@ namespace LocalWebTrayShell
 
             runtime.RetryAttempts += 1;
             delaySeconds = GetRetryDelaySeconds(retry, runtime.RetryAttempts);
+
+            // Belt-and-braces: GetRetryDelaySeconds already clamps, but a malformed or
+            // future config path could still produce a non-positive delay -- which
+            // instantly re-fires the retry timer and spins the UI. Never schedule a
+            // retry sooner than 1 second out.
+            if (delaySeconds < 1)
+            {
+                delaySeconds = 1;
+            }
+
             runtime.RetryDueAtUtc = DateTime.UtcNow.AddSeconds(delaySeconds);
             runtime.Status = CommandStatus.WaitingRetry;
             generation = ++runtime.RetryGeneration;
@@ -902,9 +912,21 @@ namespace LocalWebTrayShell
         {
             int initialDelay = Math.Max(1, retry.InitialDelaySeconds);
             int maxDelay = Math.Max(initialDelay, retry.MaxDelaySeconds);
+
+            // Compute in double and clamp BEFORE the int cast: initialDelay * 2^(attempt-1)
+            // overflows int once the exponent passes ~29 (e.g. 3 * 2^30 = 3.2 billion),
+            // which silently wraps to a negative delay. A negative delay made the retry
+            // timer fire immediately, turning auto-retry into a 0-second restart storm
+            // (~3.5 starts/second) that flooded the UI message queue and froze the app.
             double delay = initialDelay * Math.Pow(2, Math.Max(0, attempt - 1));
 
-            return Math.Min((int)delay, maxDelay);
+            if (delay > maxDelay)
+            {
+                return maxDelay;
+            }
+
+            // Floor at 1s: a retry must never spin-loop, whatever the config says.
+            return Math.Max(1, (int)delay);
         }
 
         private void QueueProcessTreeKill(string commandId, int processId)
