@@ -340,6 +340,67 @@ namespace LocalWebTrayShell
         }
     }
 
+    internal sealed class WorkspaceSplitterPanel : Panel
+    {
+        private bool hover;
+        private bool active;
+
+        public WorkspaceSplitterPanel()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            BackColor = UiTheme.WindowBackground;
+            Cursor = Cursors.HSplit;
+        }
+
+        public bool Active
+        {
+            get { return active; }
+            set
+            {
+                if (active == value)
+                {
+                    return;
+                }
+
+                active = value;
+                Invalidate();
+            }
+        }
+
+        protected override void OnMouseEnter(EventArgs e)
+        {
+            hover = true;
+            Invalidate();
+            base.OnMouseEnter(e);
+        }
+
+        protected override void OnMouseLeave(EventArgs e)
+        {
+            hover = false;
+            Invalidate();
+            base.OnMouseLeave(e);
+        }
+
+        protected override void OnPaint(PaintEventArgs e)
+        {
+            int lineHeight = active ? 3 : hover ? 2 : 1;
+            int lineY = Math.Max(0, (Height - lineHeight) / 2);
+            Color lineColor = active || hover ? UiTheme.Primary : UiTheme.BorderSoft;
+
+            e.Graphics.Clear(BackColor);
+
+            using (SolidBrush brush = new SolidBrush(lineColor))
+            {
+                e.Graphics.FillRectangle(brush, 0, lineY, Width, lineHeight);
+            }
+        }
+    }
+
     internal enum TitleBarButtonKind
     {
         Sidebar,

@@ -77,6 +77,36 @@ namespace LocalWebTrayShell
         public int Delta { get; private set; }
     }
 
+    internal enum CommandInlineAction
+    {
+        StartStop,
+        Restart
+    }
+
+    internal sealed class SidebarCommandInlineActionEventArgs : EventArgs
+    {
+        public SidebarCommandInlineActionEventArgs(CommandEntry command, CommandInlineAction action)
+        {
+            Command = command;
+            Action = action;
+        }
+
+        public CommandEntry Command { get; private set; }
+        public CommandInlineAction Action { get; private set; }
+    }
+
+    internal sealed class SidebarItemContextMenuEventArgs<T> : EventArgs
+    {
+        public SidebarItemContextMenuEventArgs(T item, Point screenLocation)
+        {
+            Item = item;
+            ScreenLocation = screenLocation;
+        }
+
+        public T Item { get; private set; }
+        public Point ScreenLocation { get; private set; }
+    }
+
     internal sealed class SidebarSurfaceControl : Control
     {
         private const int OuterLeft = 16;
@@ -90,7 +120,7 @@ namespace LocalWebTrayShell
         private const int SectionTitleHeight = 30;
         private const int ReorderColumnWidth = 28;
         private const int ActionHeight = 40;
-        private const int SiteActionsHeight = 84;
+        private const int SiteActionsHeight = 40;
         private const int CommandItemHeight = 62;
         private const int SiteItemHeight = 58;
         private const int ItemSpacing = 8;
@@ -116,6 +146,8 @@ namespace LocalWebTrayShell
         private double commandSectionRatio;
         private bool draggingSplitter;
         private Point lastMousePosition;
+        private ToolTip surfaceToolTip;
+        private string lastToolTipKey = string.Empty;
 
         public SidebarSurfaceControl()
         {
@@ -134,6 +166,10 @@ namespace LocalWebTrayShell
             Cursor = Cursors.Default;
             DoubleBuffered = true;
             commandSectionRatio = AppConfigStore.DefaultCommandSectionRatio;
+            surfaceToolTip = new ToolTip();
+            surfaceToolTip.InitialDelay = 350;
+            surfaceToolTip.ReshowDelay = 100;
+            surfaceToolTip.AutoPopDelay = 3000;
             SetStyle(
                 ControlStyles.AllPaintingInWmPaint |
                 ControlStyles.OptimizedDoubleBuffer |
@@ -176,6 +212,9 @@ namespace LocalWebTrayShell
         public event EventHandler<SidebarSiteActionEventArgs> SiteActionRequested;
         public event EventHandler<SidebarReorderEventArgs> CommandReorderRequested;
         public event EventHandler<SidebarReorderEventArgs> SiteReorderRequested;
+        public event EventHandler<SidebarCommandInlineActionEventArgs> CommandInlineActionRequested;
+        public event EventHandler<SidebarItemContextMenuEventArgs<CommandEntry>> CommandContextMenuRequested;
+        public event EventHandler<SidebarItemContextMenuEventArgs<SiteEntry>> SiteContextMenuRequested;
 
         public Func<string, CommandRuntimeSnapshot> SnapshotProvider { get; set; }
 
@@ -295,6 +334,12 @@ namespace LocalWebTrayShell
         {
             if (disposing)
             {
+                if (surfaceToolTip != null)
+                {
+                    surfaceToolTip.Dispose();
+                    surfaceToolTip = null;
+                }
+
                 appTitleFont.Dispose();
                 sectionTitleFont.Dispose();
                 buttonFont.Dispose();
@@ -388,6 +433,7 @@ namespace LocalWebTrayShell
                 Invalidate();
             }
 
+            UpdateToolTip(nextHover);
             Cursor = ResolveCursor(nextHover);
             base.OnMouseMove(e);
         }
@@ -425,6 +471,8 @@ namespace LocalWebTrayShell
 
         protected override void OnMouseLeave(EventArgs e)
         {
+            UpdateToolTip(string.Empty);
+
             if (!draggingSplitter && !string.IsNullOrEmpty(hoverKey))
             {
                 hoverKey = string.Empty;
@@ -439,9 +487,98 @@ namespace LocalWebTrayShell
             base.OnMouseLeave(e);
         }
 
+        private void UpdateToolTip(string hitKey)
+        {
+            if (string.Equals(lastToolTipKey, hitKey, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            lastToolTipKey = hitKey ?? string.Empty;
+
+            if (surfaceToolTip == null)
+            {
+                return;
+            }
+
+            if (string.IsNullOrEmpty(hitKey))
+            {
+                surfaceToolTip.SetToolTip(this, null);
+                return;
+            }
+
+            if (hitKey.StartsWith("cmd-runstop:", StringComparison.OrdinalIgnoreCase))
+            {
+                int idx;
+                if (int.TryParse(hitKey.Substring("cmd-runstop:".Length), out idx) && idx >= 0 && idx < commands.Count)
+                {
+                    CommandEntry cmd = commands[idx];
+                    CommandRuntimeSnapshot snapshot = SnapshotProvider == null || cmd == null ? null : SnapshotProvider(cmd.Id);
+                    bool isRunning = snapshot != null && snapshot.Status == CommandStatus.Running;
+                    surfaceToolTip.SetToolTip(this, isRunning ? "停止命令服务" : "启动命令服务");
+                    return;
+                }
+            }
+            else if (hitKey.StartsWith("cmd-restart:", StringComparison.OrdinalIgnoreCase))
+            {
+                surfaceToolTip.SetToolTip(this, "重启命令服务");
+                return;
+            }
+            else if (hitKey.StartsWith("cmd-up:", StringComparison.OrdinalIgnoreCase) || hitKey.StartsWith("site-up:", StringComparison.OrdinalIgnoreCase))
+            {
+                surfaceToolTip.SetToolTip(this, "上移");
+                return;
+            }
+            else if (hitKey.StartsWith("cmd-down:", StringComparison.OrdinalIgnoreCase) || hitKey.StartsWith("site-down:", StringComparison.OrdinalIgnoreCase))
+            {
+                surfaceToolTip.SetToolTip(this, "下移");
+                return;
+            }
+
+            surfaceToolTip.SetToolTip(this, null);
+        }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             string key;
+
+            if (e.Button == MouseButtons.Right)
+            {
+                key = GetHitKey(e.Location);
+                if (!string.IsNullOrEmpty(key))
+                {
+                    if (key.StartsWith("cmd:", StringComparison.OrdinalIgnoreCase) ||
+                        key.StartsWith("cmd-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int colonIndex = key.IndexOf(':');
+                        int index;
+                        if (colonIndex >= 0 && int.TryParse(key.Substring(colonIndex + 1), out index) && index >= 0 && index < commands.Count)
+                        {
+                            SelectedCommandId = commands[index].Id;
+                            Invalidate();
+                            Raise(CommandActivated, new SidebarListItemEventArgs<CommandEntry>(commands[index]));
+                            Raise(CommandContextMenuRequested, new SidebarItemContextMenuEventArgs<CommandEntry>(commands[index], PointToScreen(e.Location)));
+                            return;
+                        }
+                    }
+                    else if (key.StartsWith("site:", StringComparison.OrdinalIgnoreCase) ||
+                             key.StartsWith("site-", StringComparison.OrdinalIgnoreCase))
+                    {
+                        int colonIndex = key.IndexOf(':');
+                        int index;
+                        if (colonIndex >= 0 && int.TryParse(key.Substring(colonIndex + 1), out index) && index >= 0 && index < sites.Count)
+                        {
+                            SelectedSiteId = sites[index].Id;
+                            Invalidate();
+                            Raise(SiteActivated, new SidebarListItemEventArgs<SiteEntry>(sites[index]));
+                            Raise(SiteContextMenuRequested, new SidebarItemContextMenuEventArgs<SiteEntry>(sites[index], PointToScreen(e.Location)));
+                            return;
+                        }
+                    }
+                }
+                base.OnMouseDown(e);
+                return;
+            }
 
             if (e.Button != MouseButtons.Left)
             {
@@ -709,9 +846,9 @@ namespace LocalWebTrayShell
 
             DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u7f51\u9875", WorkspaceMode == WorkspaceMode.Web, "mode-web");
             x += buttonWidth + gap;
-            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u65e5\u5fd7", WorkspaceMode == WorkspaceMode.Logs, "mode-logs");
+            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u5206\u5c4f", WorkspaceMode == WorkspaceMode.Split, "mode-split");
             x += buttonWidth + gap;
-            DrawButton(graphics, new Rectangle(x, actionRow.Y, Math.Max(0, actionRow.Right - x), actionRow.Height), "\u5237\u65b0", false, ReloadSiteEnabled, "reload-site");
+            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, Math.Max(0, actionRow.Right - x), actionRow.Height), "\u65e5\u5fd7", WorkspaceMode == WorkspaceMode.Logs, "mode-logs");
         }
 
         private void DrawCommandSection(Graphics graphics, Rectangle section)
@@ -722,13 +859,12 @@ namespace LocalWebTrayShell
             commandListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
             TextRenderer.DrawText(graphics, "\u547d\u4ee4", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
             DrawCommandList(graphics, commandListRect);
-            DrawFiveButtons(
+            DrawFourButtons(
                 graphics,
                 actions,
                 new ButtonSpec("\u65b0\u589e", true, true, "cmd-add"),
                 new ButtonSpec("\u7f16\u8f91", false, EditCommandEnabled, "cmd-edit"),
                 new ButtonSpec("\u5220\u9664", false, DeleteCommandEnabled, "cmd-delete"),
-                new ButtonSpec("\u91cd\u542f", false, RestartCommandEnabled, "cmd-restart"),
                 new ButtonSpec(string.IsNullOrEmpty(StartStopCommandText) ? "\u542f\u52a8" : StartStopCommandText, true, StartStopCommandEnabled, "cmd-startstop"));
         }
 
@@ -736,24 +872,17 @@ namespace LocalWebTrayShell
         {
             Rectangle title = new Rectangle(section.X, section.Y + SectionPaddingTop, section.Width, SectionTitleHeight);
             Rectangle actions = new Rectangle(section.X, Math.Max(title.Bottom, section.Bottom - SiteActionsHeight), section.Width, SiteActionsHeight);
-            Rectangle siteActions = new Rectangle(actions.X, actions.Y, actions.Width, ActionHeight);
-            Rectangle navigationActions = new Rectangle(actions.X, siteActions.Bottom + 4, actions.Width, Math.Max(0, actions.Bottom - siteActions.Bottom - 4));
 
             siteListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
             TextRenderer.DrawText(graphics, "\u7ad9\u70b9", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
             DrawSiteList(graphics, siteListRect);
             DrawFourButtons(
                 graphics,
-                siteActions,
+                actions,
                 new ButtonSpec("\u65b0\u589e", true, true, "site-add"),
                 new ButtonSpec("\u7f16\u8f91", false, EditSiteEnabled, "site-edit"),
                 new ButtonSpec("\u5220\u9664", false, DeleteSiteEnabled, "site-delete"),
                 new ButtonSpec("\u6253\u5f00", false, OpenSiteEnabled, "site-open"));
-            DrawTwoButtons(
-                graphics,
-                navigationActions,
-                new ButtonSpec("\u8fd4\u56de", false, BackSiteEnabled, "back-site"),
-                new ButtonSpec("\u4e3b\u9875", false, HomeSiteEnabled, "home-site"));
         }
 
         private void DrawCommandList(Graphics graphics, Rectangle bounds)
@@ -825,8 +954,7 @@ namespace LocalWebTrayShell
             Color border = selected ? Color.FromArgb(90, 166, 194) : itemHovered ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
             int contentRight = bounds.Right - ReorderColumnWidth - 4;
             Rectangle badge = new Rectangle(contentRight - 76, bounds.Y + 9, 76, 23);
-            Rectangle title = new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, badge.X - bounds.X - 32), 23);
-            Rectangle meta = new Rectangle(bounds.X + 26, bounds.Y + 38, Math.Max(1, badge.X - bounds.X - 32), 18);
+            int titleRight = badge.X - 6;
 
             DrawCard(graphics, bounds, fill, border);
             using (SolidBrush brush = new SolidBrush(accent))
@@ -834,11 +962,110 @@ namespace LocalWebTrayShell
                 graphics.FillRectangle(brush, bounds.X + 10, bounds.Y + 10, 6, Math.Max(10, bounds.Height - 20));
             }
 
+            if (itemHovered || selected)
+            {
+                bool isRunning = status == CommandStatus.Running;
+                int btnWidth = 24;
+                int btnHeight = 23;
+                Rectangle runBtn = new Rectangle(badge.Left - btnWidth - 4, bounds.Y + 9, btnWidth, btnHeight);
+                Rectangle restartBtn = new Rectangle(runBtn.Left - btnWidth - 3, bounds.Y + 9, btnWidth, btnHeight);
+
+                hitRects["cmd-runstop:" + index] = runBtn;
+                hitRects["cmd-restart:" + index] = restartBtn;
+
+                bool runHover = string.Equals(hoverKey, "cmd-runstop:" + index, StringComparison.OrdinalIgnoreCase);
+                bool restartHover = string.Equals(hoverKey, "cmd-restart:" + index, StringComparison.OrdinalIgnoreCase);
+
+                DrawMiniIconButton(graphics, runBtn, isRunning ? MiniIconType.Stop : MiniIconType.Play, runHover);
+                DrawMiniIconButton(graphics, restartBtn, MiniIconType.Restart, restartHover);
+
+                titleRight = restartBtn.Left - 6;
+            }
+
+            Rectangle title = new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, titleRight - bounds.X - 26), 23);
+            Rectangle meta = new Rectangle(bounds.X + 26, bounds.Y + 38, Math.Max(1, titleRight - bounds.X - 26), 18);
+
             TextRenderer.DrawText(graphics, GetCommandTitle(command), itemTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
             DrawBadge(graphics, badge, snapshot == null ? "\u5df2\u505c\u6b62" : snapshot.GetDisplayStatus(), GetStatusBadgeBackground(status), accent);
             TextRenderer.DrawText(graphics, GetCommandMeta(command), itemMetaFont, meta, UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
             hitRects["cmd:" + index] = bounds;
             DrawReorderHandles(graphics, bounds, "cmd", index, commands.Count, selected || itemHovered);
+        }
+
+        private enum MiniIconType
+        {
+            Play,
+            Stop,
+            Restart
+        }
+
+        private void DrawMiniIconButton(Graphics graphics, Rectangle bounds, MiniIconType iconType, bool hover)
+        {
+            Color fill;
+            Color border;
+            Color iconColor;
+
+            if (iconType == MiniIconType.Stop)
+            {
+                fill = hover ? Color.FromArgb(254, 226, 226) : Color.FromArgb(254, 242, 242);
+                border = hover ? UiTheme.DangerForeground : Color.FromArgb(252, 165, 165);
+                iconColor = hover ? Color.FromArgb(153, 27, 27) : UiTheme.DangerForeground;
+            }
+            else if (iconType == MiniIconType.Play)
+            {
+                fill = hover ? Color.FromArgb(224, 242, 254) : UiTheme.SecondaryBack;
+                border = hover ? UiTheme.Primary : UiTheme.BorderSoft;
+                iconColor = hover ? Color.FromArgb(14, 116, 144) : UiTheme.Primary;
+            }
+            else
+            {
+                fill = hover ? Color.FromArgb(238, 242, 246) : UiTheme.SecondaryBack;
+                border = hover ? UiTheme.Primary : UiTheme.BorderSoft;
+                iconColor = hover ? UiTheme.Primary : UiTheme.TextSecondary;
+            }
+
+            DrawRoundedFill(graphics, bounds, fill, border, 4);
+
+            SmoothingMode oldMode = graphics.SmoothingMode;
+            graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            int cx = bounds.X + (bounds.Width / 2);
+            int cy = bounds.Y + (bounds.Height / 2);
+
+            using (SolidBrush brush = new SolidBrush(iconColor))
+            {
+                if (iconType == MiniIconType.Play)
+                {
+                    Point[] playTriangle = new Point[]
+                    {
+                        new Point(cx - 3, cy - 5),
+                        new Point(cx + 4, cy),
+                        new Point(cx - 3, cy + 5)
+                    };
+                    graphics.FillPolygon(brush, playTriangle);
+                }
+                else if (iconType == MiniIconType.Stop)
+                {
+                    graphics.FillRectangle(brush, cx - 4, cy - 4, 8, 8);
+                }
+                else if (iconType == MiniIconType.Restart)
+                {
+                    using (Pen pen = new Pen(iconColor, 1.8f))
+                    {
+                        graphics.DrawArc(pen, cx - 5, cy - 5, 10, 10, 0, 270);
+                    }
+
+                    Point[] arrow = new Point[]
+                    {
+                        new Point(cx + 4, cy - 5),
+                        new Point(cx, cy - 8),
+                        new Point(cx, cy - 2)
+                    };
+                    graphics.FillPolygon(brush, arrow);
+                }
+            }
+
+            graphics.SmoothingMode = oldMode;
         }
 
         private void DrawSiteItem(Graphics graphics, SiteEntry site, Rectangle bounds, int index)
@@ -1056,9 +1283,13 @@ namespace LocalWebTrayShell
                 return false;
             }
 
-            return string.Equals(hoverKey, prefix + ":" + index, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(hoverKey, prefix + "-up:" + index, StringComparison.OrdinalIgnoreCase) ||
-                   string.Equals(hoverKey, prefix + "-down:" + index, StringComparison.OrdinalIgnoreCase);
+            string suffix = ":" + index;
+            if (!hoverKey.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            return hoverKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
         }
 
         private void DrawReorderHandles(Graphics graphics, Rectangle bounds, string prefix, int index, int count, bool active)
@@ -1090,10 +1321,16 @@ namespace LocalWebTrayShell
 
         private void DrawChevron(Graphics graphics, Rectangle bounds, bool pointingUp, bool hover)
         {
-            Color color = hover ? UiTheme.TextPrimary : UiTheme.TextSecondary;
+            if (hover)
+            {
+                Rectangle bg = new Rectangle(bounds.X + 2, bounds.Y + 2, bounds.Width - 4, bounds.Height - 4);
+                DrawRoundedFill(graphics, bg, UiTheme.SecondaryPressed, UiTheme.BorderSoft, 4);
+            }
+
+            Color color = hover ? UiTheme.Primary : UiTheme.TextMuted;
             int cx = bounds.X + bounds.Width / 2;
             int cy = bounds.Y + bounds.Height / 2;
-            int size = 4;
+            int size = 5;
 
             Point[] triangle;
 
@@ -1181,9 +1418,41 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            if (key == "mode-split")
+            {
+                Raise(WorkspaceModeRequested, new SidebarWorkspaceModeEventArgs(WorkspaceMode.Split));
+                return;
+            }
+
             if (key == "mode-logs")
             {
                 Raise(WorkspaceModeRequested, new SidebarWorkspaceModeEventArgs(WorkspaceMode.Logs));
+                return;
+            }
+
+            if (key.StartsWith("cmd-runstop:", StringComparison.OrdinalIgnoreCase))
+            {
+                int index;
+                if (int.TryParse(key.Substring("cmd-runstop:".Length), out index) && index >= 0 && index < commands.Count)
+                {
+                    SelectedCommandId = commands[index].Id;
+                    Invalidate();
+                    Raise(CommandActivated, new SidebarListItemEventArgs<CommandEntry>(commands[index]));
+                    Raise(CommandInlineActionRequested, new SidebarCommandInlineActionEventArgs(commands[index], CommandInlineAction.StartStop));
+                }
+                return;
+            }
+
+            if (key.StartsWith("cmd-restart:", StringComparison.OrdinalIgnoreCase))
+            {
+                int index;
+                if (int.TryParse(key.Substring("cmd-restart:".Length), out index) && index >= 0 && index < commands.Count)
+                {
+                    SelectedCommandId = commands[index].Id;
+                    Invalidate();
+                    Raise(CommandActivated, new SidebarListItemEventArgs<CommandEntry>(commands[index]));
+                    Raise(CommandInlineActionRequested, new SidebarCommandInlineActionEventArgs(commands[index], CommandInlineAction.Restart));
+                }
                 return;
             }
 

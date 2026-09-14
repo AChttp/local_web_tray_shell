@@ -127,6 +127,19 @@ namespace LocalWebTrayShell
         private int renderedLogNextSequence;
         private string cachedStartupEnabledText;
         private string lastTrayTooltipText;
+        private readonly Panel webNavBar;
+        private readonly ThemedButton webBackButton;
+        private readonly ThemedButton webForwardButton;
+        private readonly ThemedButton webReloadButton;
+        private readonly ThemedButton webHomeButton;
+        private readonly TextBox webUrlTextBox;
+        private readonly ThemedButton webCopyUrlButton;
+        private readonly ThemedButton webOpenBrowserButton;
+        private readonly WorkspaceSplitterPanel workspaceSplitter;
+        private ContextMenuStrip commandContextMenu;
+        private ContextMenuStrip siteContextMenu;
+        private double workspaceSplitRatio = 0.58;
+        private bool draggingWorkspaceSplitter;
 
         public ShellForm()
         {
@@ -262,9 +275,91 @@ namespace LocalWebTrayShell
             rightBody.Padding = new Padding(0);
 
             webPanel = new Panel();
-            webPanel.Dock = DockStyle.Fill;
+            webPanel.Dock = DockStyle.None;
             webPanel.BackColor = UiTheme.Surface;
-            webPanel.Padding = new Padding(12);
+            webPanel.Padding = new Padding(10);
+
+            webNavBar = new Panel();
+            webNavBar.Dock = DockStyle.Top;
+            webNavBar.Height = 36;
+            webNavBar.BackColor = UiTheme.Surface;
+            webNavBar.Padding = new Padding(0, 0, 0, 6);
+
+            Panel navLeft = new Panel();
+            navLeft.Dock = DockStyle.Left;
+            navLeft.Width = 144;
+            navLeft.BackColor = UiTheme.Surface;
+
+            webBackButton = CreateToolbarButton("\u2039", "\u8fd4\u56de\u4e0a\u4e00\u9875 (Alt+Left)");
+            webBackButton.Width = 32;
+            webBackButton.Height = 30;
+            webBackButton.Location = new Point(0, 0);
+            webBackButton.Click += delegate { GoBackCurrentSite(); };
+
+            webForwardButton = CreateToolbarButton("\u203a", "\u524d\u8fdb (Alt+Right)");
+            webForwardButton.Width = 32;
+            webForwardButton.Height = 30;
+            webForwardButton.Location = new Point(36, 0);
+            webForwardButton.Click += delegate { GoForwardCurrentSite(); };
+
+            webReloadButton = CreateToolbarButton("\u21bb", "\u5237\u65b0\u9875\u9762 (F5)");
+            webReloadButton.Width = 32;
+            webReloadButton.Height = 30;
+            webReloadButton.Location = new Point(72, 0);
+            webReloadButton.Click += delegate { ReloadCurrentSite(); };
+
+            webHomeButton = CreateToolbarButton("\u2302", "\u56de\u5230\u914d\u7f6e\u4e3b\u9875");
+            webHomeButton.Width = 32;
+            webHomeButton.Height = 30;
+            webHomeButton.Location = new Point(108, 0);
+            webHomeButton.Click += delegate { NavigateCurrentSiteHome(); };
+
+            navLeft.Controls.Add(webBackButton);
+            navLeft.Controls.Add(webForwardButton);
+            navLeft.Controls.Add(webReloadButton);
+            navLeft.Controls.Add(webHomeButton);
+
+            Panel navRight = new Panel();
+            navRight.Dock = DockStyle.Right;
+            navRight.Width = 148;
+            navRight.BackColor = UiTheme.Surface;
+
+            webCopyUrlButton = CreateToolbarButton("\u590d\u5236", "\u590d\u5236\u5f53\u524d\u7f51\u5740");
+            webCopyUrlButton.Width = 52;
+            webCopyUrlButton.Height = 30;
+            webCopyUrlButton.Location = new Point(6, 0);
+            webCopyUrlButton.Click += delegate { CopyCurrentSiteUrl(); };
+
+            webOpenBrowserButton = CreateToolbarButton("\u2197 \u6d4f\u89c8\u5668", "\u5728\u7cfb\u7edf\u9ed8\u8ba4\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00");
+            webOpenBrowserButton.Width = 84;
+            webOpenBrowserButton.Height = 30;
+            webOpenBrowserButton.Location = new Point(62, 0);
+            webOpenBrowserButton.Click += delegate { OpenCurrentSiteInDefaultBrowser(); };
+
+            navRight.Controls.Add(webCopyUrlButton);
+            navRight.Controls.Add(webOpenBrowserButton);
+
+            RoundedPanel urlFrame = new RoundedPanel();
+            urlFrame.Dock = DockStyle.Fill;
+            urlFrame.Margin = new Padding(6, 0, 6, 0);
+            urlFrame.Padding = new Padding(10, 6, 10, 6);
+            urlFrame.BackColor = Color.FromArgb(244, 248, 252);
+            urlFrame.BorderColor = UiTheme.BorderSoft;
+            urlFrame.CornerRadius = 6;
+
+            webUrlTextBox = new TextBox();
+            webUrlTextBox.Dock = DockStyle.Fill;
+            webUrlTextBox.BorderStyle = BorderStyle.None;
+            webUrlTextBox.BackColor = Color.FromArgb(244, 248, 252);
+            webUrlTextBox.ForeColor = UiTheme.TextPrimary;
+            webUrlTextBox.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            webUrlTextBox.KeyDown += OnWebUrlTextBoxKeyDown;
+
+            urlFrame.Controls.Add(webUrlTextBox);
+
+            webNavBar.Controls.Add(urlFrame);
+            webNavBar.Controls.Add(navRight);
+            webNavBar.Controls.Add(navLeft);
 
             webViewHost = new Panel();
             webViewHost.Dock = DockStyle.Fill;
@@ -315,10 +410,11 @@ namespace LocalWebTrayShell
             webStateOverlay.Controls.Add(webStateLayout);
 
             webPanel.Controls.Add(webViewHost);
+            webPanel.Controls.Add(webNavBar);
             webViewHost.Controls.Add(webStateOverlay);
 
             logsPanel = new Panel();
-            logsPanel.Dock = DockStyle.Fill;
+            logsPanel.Dock = DockStyle.None;
             logsPanel.BackColor = UiTheme.Surface;
             logsPanel.Padding = new Padding(12);
 
@@ -380,15 +476,24 @@ namespace LocalWebTrayShell
             logsTextBox.ReadOnly = true;
             logsTextBox.ScrollBars = ScrollBars.Both;
             logsTextBox.WordWrap = false;
-            logsTextBox.BackColor = Color.FromArgb(14, 22, 32);
-            logsTextBox.ForeColor = Color.FromArgb(228, 236, 246);
+            logsTextBox.BackColor = UiTheme.TerminalBackground;
+            logsTextBox.ForeColor = UiTheme.TerminalForeground;
             logsTextBox.Font = new Font("Cascadia Mono", 10f, FontStyle.Regular);
 
             logsPanel.Controls.Add(logsTextBox);
             logsPanel.Controls.Add(logsToolbar);
 
+            workspaceSplitter = new WorkspaceSplitterPanel();
+            workspaceSplitter.Height = 8;
+            workspaceSplitter.Visible = false;
+            workspaceSplitter.MouseDown += OnWorkspaceSplitterMouseDown;
+            workspaceSplitter.MouseMove += OnWorkspaceSplitterMouseMove;
+            workspaceSplitter.MouseUp += OnWorkspaceSplitterMouseUp;
+
             rightBody.Controls.Add(webPanel);
+            rightBody.Controls.Add(workspaceSplitter);
             rightBody.Controls.Add(logsPanel);
+            rightBody.Resize += delegate { LayoutRightBodyContent(); };
 
             workspacePanel.Controls.Add(rightBody);
 
@@ -443,6 +548,40 @@ namespace LocalWebTrayShell
             updatingStartupToggle = true;
             trayStartupMenuItem.Checked = WindowsStartupManager.IsEnabled();
             updatingStartupToggle = false;
+
+            UiTheme.ApplyModernMenuTheme(trayMenu);
+            InitializeContextMenus();
+            sidebarSurface.CommandContextMenuRequested += delegate(object sender, SidebarItemContextMenuEventArgs<CommandEntry> e)
+            {
+                if (e != null && e.Item != null)
+                {
+                    SelectCommand(e.Item, false);
+                    commandContextMenu.Show(e.ScreenLocation);
+                }
+            };
+            sidebarSurface.SiteContextMenuRequested += delegate(object sender, SidebarItemContextMenuEventArgs<SiteEntry> e)
+            {
+                if (e != null && e.Item != null)
+                {
+                    SelectSite(e.Item);
+                    siteContextMenu.Show(e.ScreenLocation);
+                }
+            };
+            sidebarSurface.CommandInlineActionRequested += delegate(object sender, SidebarCommandInlineActionEventArgs e)
+            {
+                if (e != null && e.Command != null)
+                {
+                    SelectCommand(e.Command, false);
+                    if (e.Action == CommandInlineAction.StartStop)
+                    {
+                        OnStartStopCommandClicked(this, EventArgs.Empty);
+                    }
+                    else if (e.Action == CommandInlineAction.Restart)
+                    {
+                        OnRestartCommandClicked(this, EventArgs.Empty);
+                    }
+                }
+            };
 
             Shown += OnShown;
             Resize += OnResize;
@@ -629,7 +768,7 @@ namespace LocalWebTrayShell
 
             RefreshCommandCardsState();
             RefreshCommandButtons();
-            if (workspaceMode == WorkspaceMode.Logs)
+            if (workspaceMode == WorkspaceMode.Logs || workspaceMode == WorkspaceMode.Split)
             {
                 RefreshLogsView();
             }
@@ -778,7 +917,7 @@ namespace LocalWebTrayShell
         {
             string currentCommandId;
 
-            if (workspaceMode != WorkspaceMode.Logs || currentCommand == null)
+            if ((workspaceMode != WorkspaceMode.Logs && workspaceMode != WorkspaceMode.Split) || currentCommand == null)
             {
                 return false;
             }
@@ -962,7 +1101,7 @@ namespace LocalWebTrayShell
             RefreshLogsView();
             lastLogAutoScrollEnabled = true;
 
-            if (switchToLogs)
+            if (switchToLogs && workspaceMode != WorkspaceMode.Split)
             {
                 SetWorkspaceMode(WorkspaceMode.Logs);
             }
@@ -973,7 +1112,16 @@ namespace LocalWebTrayShell
             currentSite = site;
             UpdateSiteSelectionVisuals();
             RefreshSiteButtons();
-            SetWorkspaceMode(WorkspaceMode.Web);
+            RefreshWebNavigationVisuals();
+
+            if (workspaceMode != WorkspaceMode.Split)
+            {
+                SetWorkspaceMode(WorkspaceMode.Web);
+            }
+            else
+            {
+                ShowSite(site);
+            }
         }
 
         private async void ShowSite(SiteEntry site)
@@ -1024,6 +1172,7 @@ namespace LocalWebTrayShell
                     SetWebState(string.Empty, string.Empty, false);
                 }
 
+                RefreshWebNavigationVisuals();
                 return;
             }
 
@@ -1039,6 +1188,7 @@ namespace LocalWebTrayShell
                 state.LastNavigatedUrl = site.Url;
                 state.WebView.CoreWebView2.Navigate(site.Url);
                 SetWebState("\u6b63\u5728\u52a0\u8f7d " + site.Name, site.Url, false);
+                RefreshWebNavigationVisuals();
             }
             catch (Exception ex)
             {
@@ -1094,6 +1244,7 @@ namespace LocalWebTrayShell
             {
                 SetTransientStatus("\u6b63\u5728\u52a0\u8f7d " + state.Site.Name + " - " + e.Uri, 1);
                 SetWebState("\u6b63\u5728\u52a0\u8f7d " + state.Site.Name, e.Uri, false);
+                RefreshWebNavigationVisuals();
             }
         }
 
@@ -1154,6 +1305,7 @@ namespace LocalWebTrayShell
                 e.IsSuccess ? string.Empty : navigationUrl,
                 !e.IsSuccess);
             RefreshSiteButtons();
+            RefreshWebNavigationVisuals();
         }
 
         private void RecordSiteNavigation(SiteViewState state, string url)
@@ -1504,7 +1656,10 @@ namespace LocalWebTrayShell
         {
             if (currentSite != null)
             {
-                SetWorkspaceMode(WorkspaceMode.Web);
+                if (workspaceMode != WorkspaceMode.Split)
+                {
+                    SetWorkspaceMode(WorkspaceMode.Web);
+                }
                 ShowSite(currentSite);
             }
         }
@@ -1539,7 +1694,10 @@ namespace LocalWebTrayShell
                 state.IsInitialized &&
                 state.WebView.CoreWebView2 != null)
             {
-                SetWorkspaceMode(WorkspaceMode.Web);
+                if (workspaceMode != WorkspaceMode.Split)
+                {
+                    SetWorkspaceMode(WorkspaceMode.Web);
+                }
 
                 if (state.WebView.CoreWebView2.CanGoBack)
                 {
@@ -1547,6 +1705,7 @@ namespace LocalWebTrayShell
                     state.WebView.CoreWebView2.GoBack();
                     SetTransientStatus("\u6b63\u5728\u8fd4\u56de\u4e0a\u4e00\u9875...");
                     RefreshSiteButtons();
+                    RefreshWebNavigationVisuals();
                     return;
                 }
 
@@ -1558,6 +1717,7 @@ namespace LocalWebTrayShell
                     SetTransientStatus("\u6b63\u5728\u8fd4\u56de\u4e0a\u4e00\u9875...");
                     SetWebState("\u6b63\u5728\u8fd4\u56de\u4e0a\u4e00\u9875", previousUrl, false);
                     RefreshSiteButtons();
+                    RefreshWebNavigationVisuals();
                     return;
                 }
             }
@@ -1579,12 +1739,16 @@ namespace LocalWebTrayShell
                 state.IsInitialized &&
                 state.WebView.CoreWebView2 != null)
             {
-                SetWorkspaceMode(WorkspaceMode.Web);
+                if (workspaceMode != WorkspaceMode.Split)
+                {
+                    SetWorkspaceMode(WorkspaceMode.Web);
+                }
                 state.LastNavigatedUrl = currentSite.Url;
                 state.WebView.CoreWebView2.Navigate(currentSite.Url);
                 SetTransientStatus("\u6b63\u5728\u56de\u5230 " + currentSite.Name + " \u4e3b\u9875...");
                 SetWebState("\u6b63\u5728\u6253\u5f00 " + currentSite.Name, currentSite.Url, false);
                 RefreshSiteButtons();
+                RefreshWebNavigationVisuals();
                 return;
             }
 
@@ -1649,6 +1813,460 @@ namespace LocalWebTrayShell
             }
 
             ShowSite(currentSite);
+        }
+
+        private void GoForwardCurrentSite()
+        {
+            SiteViewState state;
+
+            if (currentSite == null)
+            {
+                return;
+            }
+
+            if (siteViews.TryGetValue(currentSite.Id, out state) &&
+                state.IsInitialized &&
+                state.WebView.CoreWebView2 != null &&
+                state.WebView.CoreWebView2.CanGoForward)
+            {
+                state.WebView.CoreWebView2.GoForward();
+                SetTransientStatus("\u6b63\u5728\u524d\u8fdb...");
+                RefreshWebNavigationVisuals();
+            }
+        }
+
+        private void CopyCurrentSiteUrl()
+        {
+            string url = webUrlTextBox != null && !string.IsNullOrWhiteSpace(webUrlTextBox.Text)
+                ? webUrlTextBox.Text
+                : currentSite != null ? currentSite.Url : string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                try
+                {
+                    Clipboard.SetText(url);
+                    SetTransientStatus("\u7f51\u5740\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\u3002");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Warn("web", "\u590d\u5236\u7f51\u5740\u5931\u8d25: " + ex.Message);
+                }
+            }
+        }
+
+        private void OpenCurrentSiteInDefaultBrowser()
+        {
+            string url = webUrlTextBox != null && !string.IsNullOrWhiteSpace(webUrlTextBox.Text)
+                ? webUrlTextBox.Text
+                : currentSite != null ? currentSite.Url : string.Empty;
+
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                try
+                {
+                    System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                    {
+                        FileName = url,
+                        UseShellExecute = true
+                    });
+                    SetTransientStatus("\u5df2\u5728\u9ed8\u8ba4\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00\u3002");
+                }
+                catch (Exception ex)
+                {
+                    AppLogger.Error("web", "\u5728\u9ed8\u8ba4\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00\u5931\u8d25", ex);
+                }
+            }
+        }
+
+        private void OnWebUrlTextBoxKeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.KeyCode == Keys.Enter)
+            {
+                e.Handled = true;
+                e.SuppressKeyPress = true;
+                NavigateToCustomUrl(webUrlTextBox.Text);
+            }
+        }
+
+        private void NavigateToCustomUrl(string inputUrl)
+        {
+            if (string.IsNullOrWhiteSpace(inputUrl) || currentSite == null)
+            {
+                return;
+            }
+
+            string target = inputUrl.Trim();
+            if (!target.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !target.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                target = "http://" + target;
+            }
+
+            Uri uri;
+            if (Uri.TryCreate(target, UriKind.Absolute, out uri))
+            {
+                SiteViewState state;
+                if (siteViews.TryGetValue(currentSite.Id, out state) &&
+                    state.IsInitialized &&
+                    state.WebView.CoreWebView2 != null)
+                {
+                    state.WebView.CoreWebView2.Navigate(uri.AbsoluteUri);
+                    SetTransientStatus("\u6b63\u5728\u52a0\u8f7d: " + uri.AbsoluteUri);
+                }
+            }
+        }
+
+        private void RefreshWebNavigationVisuals()
+        {
+            SiteViewState state = null;
+            bool hasSite = currentSite != null &&
+                siteViews.TryGetValue(currentSite.Id, out state) &&
+                state.IsInitialized &&
+                state.WebView.CoreWebView2 != null;
+
+            if (webBackButton != null)
+            {
+                webBackButton.Enabled = hasSite &&
+                    (state.WebView.CoreWebView2.CanGoBack || (state.NavigationHistory != null && state.NavigationHistory.Count > 1));
+            }
+
+            if (webForwardButton != null)
+            {
+                webForwardButton.Enabled = hasSite && state.WebView.CoreWebView2.CanGoForward;
+            }
+
+            if (webReloadButton != null)
+            {
+                webReloadButton.Enabled = currentSite != null;
+            }
+
+            if (webHomeButton != null)
+            {
+                webHomeButton.Enabled = currentSite != null;
+            }
+
+            if (webCopyUrlButton != null)
+            {
+                webCopyUrlButton.Enabled = currentSite != null;
+            }
+
+            if (webOpenBrowserButton != null)
+            {
+                webOpenBrowserButton.Enabled = currentSite != null;
+            }
+
+            if (webUrlTextBox != null)
+            {
+                if (currentSite != null)
+                {
+                    string currentUrl = hasSite && !string.IsNullOrWhiteSpace(state.CurrentNavigationUrl)
+                        ? state.CurrentNavigationUrl
+                        : currentSite.Url;
+
+                    if (!webUrlTextBox.Focused && !string.Equals(webUrlTextBox.Text, currentUrl, StringComparison.OrdinalIgnoreCase))
+                    {
+                        webUrlTextBox.Text = currentUrl;
+                    }
+                    webUrlTextBox.Enabled = true;
+                }
+                else
+                {
+                    webUrlTextBox.Text = string.Empty;
+                    webUrlTextBox.Enabled = false;
+                }
+            }
+        }
+
+        private ThemedButton CreateToolbarButton(string text, string tooltipText)
+        {
+            ThemedButton button = new ThemedButton();
+            button.Text = text;
+            button.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
+            button.CornerRadius = 4;
+            button.NormalBackColor = UiTheme.SecondaryBack;
+            button.HoverBackColor = UiTheme.SecondaryHover;
+            button.PressedBackColor = UiTheme.SecondaryPressed;
+            button.DisabledBackColor = UiTheme.SecondaryDisabled;
+            button.NormalForeColor = UiTheme.TextPrimary;
+            button.DisabledForeColor = UiTheme.TextDisabled;
+            button.BorderColor = UiTheme.BorderSoft;
+            button.Padding = new Padding(0);
+
+            if (!string.IsNullOrEmpty(tooltipText))
+            {
+                ToolTip tooltip = new ToolTip();
+                tooltip.SetToolTip(button, tooltipText);
+            }
+
+            return button;
+        }
+
+        private void InitializeContextMenus()
+        {
+            commandContextMenu = new ContextMenuStrip();
+            UiTheme.ApplyModernMenuTheme(commandContextMenu);
+
+            ToolStripMenuItem cmdStartStopItem = new ToolStripMenuItem("\u542f\u52a8 / \u505c\u6b62");
+            cmdStartStopItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    OnStartStopCommandClicked(this, EventArgs.Empty);
+                }
+            };
+
+            ToolStripMenuItem cmdRestartItem = new ToolStripMenuItem("\u91cd\u542f\u547d\u4ee4");
+            cmdRestartItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    OnRestartCommandClicked(this, EventArgs.Empty);
+                }
+            };
+
+            ToolStripMenuItem cmdLogsItem = new ToolStripMenuItem("\u67e5\u770b\u65e5\u5fd7");
+            cmdLogsItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    SelectCommand(currentCommand, true);
+                }
+            };
+
+            ToolStripMenuItem cmdCopyItem = new ToolStripMenuItem("\u590d\u5236\u547d\u4ee4\u5185\u5bb9");
+            cmdCopyItem.Click += delegate
+            {
+                if (currentCommand != null && !string.IsNullOrWhiteSpace(currentCommand.Command))
+                {
+                    try
+                    {
+                        Clipboard.SetText(currentCommand.Command);
+                        SetTransientStatus("\u547d\u4ee4\u5df2\u590d\u5236\u3002");
+                    }
+                    catch { }
+                }
+            };
+
+            ToolStripMenuItem cmdEditItem = new ToolStripMenuItem("\u7f16\u8f91\u547d\u4ee4...");
+            cmdEditItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    OnEditCommandClicked(this, EventArgs.Empty);
+                }
+            };
+
+            ToolStripMenuItem cmdUpItem = new ToolStripMenuItem("\u4e0a\u79fb");
+            cmdUpItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    int idx = commands.IndexOf(currentCommand);
+                    if (idx > 0)
+                    {
+                        OnCommandReorderRequested(this, new SidebarReorderEventArgs(idx, -1));
+                    }
+                }
+            };
+
+            ToolStripMenuItem cmdDownItem = new ToolStripMenuItem("\u4e0b\u79fb");
+            cmdDownItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    int idx = commands.IndexOf(currentCommand);
+                    if (idx >= 0 && idx < commands.Count - 1)
+                    {
+                        OnCommandReorderRequested(this, new SidebarReorderEventArgs(idx, 1));
+                    }
+                }
+            };
+
+            ToolStripMenuItem cmdDeleteItem = new ToolStripMenuItem("\u5220\u9664\u547d\u4ee4");
+            cmdDeleteItem.Click += delegate
+            {
+                if (currentCommand != null)
+                {
+                    OnDeleteCommandClicked(this, EventArgs.Empty);
+                }
+            };
+
+            commandContextMenu.Items.Add(cmdStartStopItem);
+            commandContextMenu.Items.Add(cmdRestartItem);
+            commandContextMenu.Items.Add(cmdLogsItem);
+            commandContextMenu.Items.Add(cmdCopyItem);
+            commandContextMenu.Items.Add(new ToolStripSeparator());
+            commandContextMenu.Items.Add(cmdEditItem);
+            commandContextMenu.Items.Add(cmdUpItem);
+            commandContextMenu.Items.Add(cmdDownItem);
+            commandContextMenu.Items.Add(new ToolStripSeparator());
+            commandContextMenu.Items.Add(cmdDeleteItem);
+
+            siteContextMenu = new ContextMenuStrip();
+            UiTheme.ApplyModernMenuTheme(siteContextMenu);
+
+            ToolStripMenuItem siteOpenItem = new ToolStripMenuItem("\u5728\u5f53\u524d\u89c6\u53e3\u6253\u5f00");
+            siteOpenItem.Click += delegate
+            {
+                if (currentSite != null)
+                {
+                    SelectSite(currentSite);
+                }
+            };
+
+            ToolStripMenuItem siteExternalItem = new ToolStripMenuItem("\u5728\u9ed8\u8ba4\u6d4f\u89c8\u5668\u6253\u5f00");
+            siteExternalItem.Click += delegate
+            {
+                OpenCurrentSiteInDefaultBrowser();
+            };
+
+            ToolStripMenuItem siteReloadItem = new ToolStripMenuItem("\u5237\u65b0\u9875\u9762");
+            siteReloadItem.Click += delegate
+            {
+                ReloadCurrentSite();
+            };
+
+            ToolStripMenuItem siteCopyItem = new ToolStripMenuItem("\u590d\u5236\u7ad9\u70b9\u7f51\u5740");
+            siteCopyItem.Click += delegate
+            {
+                CopyCurrentSiteUrl();
+            };
+
+            ToolStripMenuItem siteEditItem = new ToolStripMenuItem("\u7f16\u8f91\u7ad9\u70b9...");
+            siteEditItem.Click += delegate
+            {
+                if (currentSite != null)
+                {
+                    OnEditSiteClicked(this, EventArgs.Empty);
+                }
+            };
+
+            ToolStripMenuItem siteUpItem = new ToolStripMenuItem("\u4e0a\u79fb");
+            siteUpItem.Click += delegate
+            {
+                if (currentSite != null)
+                {
+                    int idx = sites.IndexOf(currentSite);
+                    if (idx > 0)
+                    {
+                        OnSiteReorderRequested(this, new SidebarReorderEventArgs(idx, -1));
+                    }
+                }
+            };
+
+            ToolStripMenuItem siteDownItem = new ToolStripMenuItem("\u4e0b\u79fb");
+            siteDownItem.Click += delegate
+            {
+                if (currentSite != null)
+                {
+                    int idx = sites.IndexOf(currentSite);
+                    if (idx >= 0 && idx < sites.Count - 1)
+                    {
+                        OnSiteReorderRequested(this, new SidebarReorderEventArgs(idx, 1));
+                    }
+                }
+            };
+
+            ToolStripMenuItem siteDeleteItem = new ToolStripMenuItem("\u5220\u9664\u7ad9\u70b9");
+            siteDeleteItem.Click += delegate
+            {
+                if (currentSite != null)
+                {
+                    OnDeleteSiteClicked(this, EventArgs.Empty);
+                }
+            };
+
+            siteContextMenu.Items.Add(siteOpenItem);
+            siteContextMenu.Items.Add(siteExternalItem);
+            siteContextMenu.Items.Add(siteReloadItem);
+            siteContextMenu.Items.Add(siteCopyItem);
+            siteContextMenu.Items.Add(new ToolStripSeparator());
+            siteContextMenu.Items.Add(siteEditItem);
+            siteContextMenu.Items.Add(siteUpItem);
+            siteContextMenu.Items.Add(siteDownItem);
+            siteContextMenu.Items.Add(new ToolStripSeparator());
+            siteContextMenu.Items.Add(siteDeleteItem);
+        }
+
+        private void LayoutRightBodyContent()
+        {
+            int totalWidth = rightBody.Width;
+            int totalHeight = rightBody.Height;
+
+            if (totalWidth <= 0 || totalHeight <= 0)
+            {
+                return;
+            }
+
+            if (workspaceMode == WorkspaceMode.Web)
+            {
+                webPanel.Visible = true;
+                workspaceSplitter.Visible = false;
+                logsPanel.Visible = false;
+                SetBoundsIfChanged(webPanel, 0, 0, totalWidth, totalHeight);
+            }
+            else if (workspaceMode == WorkspaceMode.Logs)
+            {
+                webPanel.Visible = false;
+                workspaceSplitter.Visible = false;
+                logsPanel.Visible = true;
+                SetBoundsIfChanged(logsPanel, 0, 0, totalWidth, totalHeight);
+            }
+            else if (workspaceMode == WorkspaceMode.Split)
+            {
+                webPanel.Visible = true;
+                workspaceSplitter.Visible = true;
+                logsPanel.Visible = true;
+
+                int splitterHeight = 8;
+                int minWebHeight = 180;
+                int minLogsHeight = 140;
+
+                int available = totalHeight - splitterHeight;
+                int desiredWeb = (int)(available * workspaceSplitRatio);
+                int webHeight = Math.Max(minWebHeight, Math.Min(available - minLogsHeight, desiredWeb));
+                int logsHeight = Math.Max(minLogsHeight, available - webHeight);
+
+                SetBoundsIfChanged(webPanel, 0, 0, totalWidth, webHeight);
+                SetBoundsIfChanged(workspaceSplitter, 0, webHeight, totalWidth, splitterHeight);
+                SetBoundsIfChanged(logsPanel, 0, webHeight + splitterHeight, totalWidth, logsHeight);
+            }
+        }
+
+        private void OnWorkspaceSplitterMouseDown(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Left && workspaceMode == WorkspaceMode.Split)
+            {
+                draggingWorkspaceSplitter = true;
+                workspaceSplitter.Capture = true;
+                workspaceSplitter.Active = true;
+            }
+        }
+
+        private void OnWorkspaceSplitterMouseMove(object sender, MouseEventArgs e)
+        {
+            if (draggingWorkspaceSplitter && workspaceMode == WorkspaceMode.Split)
+            {
+                Point pt = rightBody.PointToClient(Cursor.Position);
+                int available = rightBody.Height - 8;
+                if (available > 0)
+                {
+                    double ratio = (double)pt.Y / available;
+                    workspaceSplitRatio = Math.Max(0.20, Math.Min(0.80, ratio));
+                    LayoutRightBodyContent();
+                }
+            }
+        }
+
+        private void OnWorkspaceSplitterMouseUp(object sender, MouseEventArgs e)
+        {
+            if (draggingWorkspaceSplitter)
+            {
+                draggingWorkspaceSplitter = false;
+                workspaceSplitter.Capture = false;
+                workspaceSplitter.Active = false;
+            }
         }
 
         private void OnClearLogsClicked(object sender, EventArgs e)
@@ -1888,22 +2506,55 @@ namespace LocalWebTrayShell
         private void SetWorkspaceMode(WorkspaceMode mode)
         {
             workspaceMode = mode;
-            webPanel.Visible = mode == WorkspaceMode.Web;
-            logsPanel.Visible = mode == WorkspaceMode.Logs;
             sidebarSurface.WorkspaceMode = mode;
             sidebarSurface.Invalidate();
-            SetWindowTitle(mode == WorkspaceMode.Web
-                ? currentSite == null ? AppName : AppName + " - " + currentSite.Name
-                : currentCommand == null ? AppName : AppName + " - " + currentCommand.Name);
 
-            if (mode == WorkspaceMode.Web && currentSite != null)
+            if (mode == WorkspaceMode.Logs)
             {
-                ShowSite(currentSite);
+                SetWindowTitle(currentCommand == null ? AppName : AppName + " - " + currentCommand.Name);
             }
-            else if (mode == WorkspaceMode.Logs)
+            else if (mode == WorkspaceMode.Split)
+            {
+                string sitePart = currentSite != null ? currentSite.Name : null;
+                string cmdPart = currentCommand != null ? currentCommand.Name : null;
+                if (sitePart != null && cmdPart != null)
+                {
+                    SetWindowTitle(AppName + " - " + sitePart + " [" + cmdPart + "]");
+                }
+                else if (sitePart != null)
+                {
+                    SetWindowTitle(AppName + " - " + sitePart);
+                }
+                else if (cmdPart != null)
+                {
+                    SetWindowTitle(AppName + " - " + cmdPart);
+                }
+                else
+                {
+                    SetWindowTitle(AppName);
+                }
+            }
+            else
+            {
+                SetWindowTitle(currentSite == null ? AppName : AppName + " - " + currentSite.Name);
+            }
+
+            LayoutRightBodyContent();
+
+            if (mode == WorkspaceMode.Web || mode == WorkspaceMode.Split)
+            {
+                if (currentSite != null)
+                {
+                    ShowSite(currentSite);
+                }
+            }
+
+            if (mode == WorkspaceMode.Logs || mode == WorkspaceMode.Split)
             {
                 RefreshLogsView();
             }
+
+            RefreshWebNavigationVisuals();
         }
 
         private void SetWindowTitle(string title)
@@ -2187,6 +2838,8 @@ namespace LocalWebTrayShell
                 workspacePanel.Padding.Top,
                 Math.Max(0, contentWidth),
                 contentHeight);
+
+            LayoutRightBodyContent();
         }
 
         private void SnapSidebarWidth()

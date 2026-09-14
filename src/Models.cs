@@ -221,6 +221,7 @@ namespace LocalWebTrayShell
     internal enum WorkspaceMode
     {
         Web,
+        Split,
         Logs
     }
 

@@ -40,6 +40,26 @@ namespace LocalWebTrayShell
         public static readonly Color WarningForeground = Color.FromArgb(159, 95, 10);
         public static readonly Color DangerBackground = Color.FromArgb(250, 226, 231);
         public static readonly Color DangerForeground = Color.FromArgb(169, 50, 67);
+        public static readonly Color TerminalBackground = Color.FromArgb(20, 27, 38);
+        public static readonly Color TerminalForeground = Color.FromArgb(226, 232, 240);
+        public static readonly Color ToolbarBackground = Color.FromArgb(248, 250, 252);
+        public static readonly Color ToolbarBorder = Color.FromArgb(226, 232, 240);
+        public static readonly Color SplitterColor = Color.FromArgb(203, 213, 225);
+        public static readonly Color SplitterHoverColor = Color.FromArgb(0, 126, 167);
+
+        public static void ApplyModernMenuTheme(ContextMenuStrip menu)
+        {
+            if (menu == null)
+            {
+                return;
+            }
+
+            menu.Renderer = new ToolStripProfessionalRenderer(new ThemedColorTable());
+            menu.BackColor = Surface;
+            menu.ForeColor = TextPrimary;
+            menu.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            menu.ShowImageMargin = false;
+        }
 
         public static GraphicsPath CreateRoundedRectanglePath(Rectangle bounds, int radius)
         {
@@ -141,5 +161,20 @@ namespace LocalWebTrayShell
             button.Padding = new Padding(10, 0, 10, 0);
             button.Invalidate();
         }
+    }
+
+    internal sealed class ThemedColorTable : ProfessionalColorTable
+    {
+        public override Color ToolStripDropDownBackground { get { return UiTheme.Surface; } }
+        public override Color ImageMarginGradientBegin { get { return UiTheme.Surface; } }
+        public override Color ImageMarginGradientMiddle { get { return UiTheme.Surface; } }
+        public override Color ImageMarginGradientEnd { get { return UiTheme.Surface; } }
+        public override Color MenuItemSelected { get { return UiTheme.SecondaryHover; } }
+        public override Color MenuItemSelectedGradientBegin { get { return UiTheme.SecondaryHover; } }
+        public override Color MenuItemSelectedGradientEnd { get { return UiTheme.SecondaryHover; } }
+        public override Color MenuItemBorder { get { return UiTheme.BorderSoft; } }
+        public override Color MenuBorder { get { return UiTheme.Border; } }
+        public override Color SeparatorDark { get { return UiTheme.BorderSoft; } }
+        public override Color SeparatorLight { get { return UiTheme.Surface; } }
     }
 }
