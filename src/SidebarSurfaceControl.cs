@@ -534,6 +534,29 @@ namespace LocalWebTrayShell
                 surfaceToolTip.SetToolTip(this, "下移");
                 return;
             }
+            else if (hitKey.StartsWith("site:", StringComparison.OrdinalIgnoreCase))
+            {
+                int idx;
+                if (int.TryParse(hitKey.Substring("site:".Length), out idx) && idx >= 0 && idx < sites.Count)
+                {
+                    SiteEntry site = sites[idx];
+                    SiteHealth health = SiteHealth.Unknown;
+                    if (site != null && SiteHealthProvider != null)
+                    {
+                        try
+                        {
+                            health = SiteHealthProvider(site.Id);
+                        }
+                        catch
+                        {
+                        }
+                    }
+
+                    string statusDesc = health == SiteHealth.Up ? "服务正常" : health == SiteHealth.Down ? "服务不可达" : "状态检测中";
+                    surfaceToolTip.SetToolTip(this, (site != null ? site.Name : string.Empty) + " · " + statusDesc + "\r\n" + (site != null ? site.Url : string.Empty));
+                    return;
+                }
+            }
 
             surfaceToolTip.SetToolTip(this, null);
         }
@@ -957,10 +980,7 @@ namespace LocalWebTrayShell
             int titleRight = badge.X - 6;
 
             DrawCard(graphics, bounds, fill, border);
-            using (SolidBrush brush = new SolidBrush(accent))
-            {
-                graphics.FillRectangle(brush, bounds.X + 10, bounds.Y + 10, 6, Math.Max(10, bounds.Height - 20));
-            }
+            DrawRoundedFill(graphics, new Rectangle(bounds.X + 10, bounds.Y + 10, 5, Math.Max(10, bounds.Height - 20)), accent, accent, 2);
 
             if (itemHovered || selected)
             {
@@ -1070,64 +1090,47 @@ namespace LocalWebTrayShell
 
         private void DrawSiteItem(Graphics graphics, SiteEntry site, Rectangle bounds, int index)
         {
-            Color accent = Color.FromArgb(207, 137, 42);
-            bool selected = site != null && string.Equals(site.Id, SelectedSiteId, StringComparison.OrdinalIgnoreCase);
-            bool itemHovered = IsItemHovered("site", index);
-            Color fill = selected ? Color.FromArgb(255, 239, 214) : itemHovered ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
-            Color border = selected ? Color.FromArgb(224, 166, 75) : itemHovered ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
-
-            DrawCard(graphics, bounds, fill, border);
-            using (SolidBrush brush = new SolidBrush(accent))
+            SiteHealth health = SiteHealth.Unknown;
+            if (site != null && SiteHealthProvider != null)
             {
-                graphics.FillRectangle(brush, bounds.X + 10, bounds.Y + 10, 6, Math.Max(10, bounds.Height - 20));
+                try
+                {
+                    health = SiteHealthProvider(site.Id);
+                }
+                catch
+                {
+                }
             }
 
+            Color accent = GetSiteAccent(health);
+            bool selected = site != null && string.Equals(site.Id, SelectedSiteId, StringComparison.OrdinalIgnoreCase);
+            bool itemHovered = IsItemHovered("site", index);
+            Color fill = selected ? Color.FromArgb(232, 244, 252) : itemHovered ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
+            Color border = selected ? UiTheme.Primary : itemHovered ? Blend(UiTheme.Border, accent, 0.22f) : UiTheme.Border;
+
+            DrawCard(graphics, bounds, fill, border);
+            DrawRoundedFill(graphics, new Rectangle(bounds.X + 10, bounds.Y + 10, 5, Math.Max(10, bounds.Height - 20)), accent, accent, 2);
+
             int siteContentRight = bounds.Right - ReorderColumnWidth - 4;
-            DrawSiteHealthDot(graphics, site, bounds);
-            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, new Rectangle(bounds.X + 42, bounds.Y + 9, Math.Max(1, siteContentRight - bounds.X - 48), 20), UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
-            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, new Rectangle(bounds.X + 42, bounds.Y + 34, Math.Max(1, siteContentRight - bounds.X - 48), 18), UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
+            Rectangle titleRect = new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, siteContentRight - bounds.X - 30), 22);
+            Rectangle urlRect = new Rectangle(bounds.X + 26, bounds.Y + 35, Math.Max(1, siteContentRight - bounds.X - 30), 18);
+
+            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, titleRect, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
+            TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, urlRect, UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
             hitRects["site:" + index] = bounds;
             DrawReorderHandles(graphics, bounds, "site", index, sites.Count, selected || itemHovered);
         }
 
-        private void DrawSiteHealthDot(Graphics graphics, SiteEntry site, Rectangle bounds)
+        private static Color GetSiteAccent(SiteHealth health)
         {
-            if (site == null || SiteHealthProvider == null)
-            {
-                return;
-            }
-
-            SiteHealth health;
-            Color color;
-
-            try
-            {
-                health = SiteHealthProvider(site.Id);
-            }
-            catch
-            {
-                return;
-            }
-
             switch (health)
             {
                 case SiteHealth.Up:
-                    color = Color.FromArgb(56, 161, 105);
-                    break;
+                    return Color.FromArgb(46, 160, 97);
                 case SiteHealth.Down:
-                    color = Color.FromArgb(201, 68, 68);
-                    break;
+                    return Color.FromArgb(220, 68, 68);
                 default:
-                    return;
-            }
-
-            int size = 8;
-            int x = bounds.X + 26;
-            int y = bounds.Y + 15;
-
-            using (SolidBrush brush = new SolidBrush(color))
-            {
-                graphics.FillEllipse(brush, x, y, size, size);
+                    return Color.FromArgb(160, 174, 192);
             }
         }
 
