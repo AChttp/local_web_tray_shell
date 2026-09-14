@@ -45,9 +45,13 @@ namespace LocalWebTrayShell
 
         public Color NormalForeColor { get; set; }
 
+        public Color HoverForeColor { get; set; }
+
         public Color DisabledForeColor { get; set; }
 
         public Color BorderColor { get; set; }
+
+        public Color HoverBorderColor { get; set; }
 
         public Color DisabledBorderColor { get; set; }
 
@@ -97,26 +101,36 @@ namespace LocalWebTrayShell
             Rectangle bounds = new Rectangle(0, 0, Math.Max(1, Width - 1), Math.Max(1, Height - 1));
             Color parentBack = Parent == null ? UiTheme.WindowBackground : Parent.BackColor;
             Color fill = GetFillColor();
-            Color border = Enabled ? BorderColor : DisabledBorderColor;
+            Color border = Enabled ? (hover && HoverBorderColor != Color.Empty ? HoverBorderColor : BorderColor) : DisabledBorderColor;
+
+            if (hover && Enabled && HoverBorderColor == Color.Empty && border != Color.Transparent && border != UiTheme.Primary)
+            {
+                border = UiTheme.BorderHover;
+            }
 
             pevent.Graphics.Clear(parentBack);
             pevent.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             pevent.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            pevent.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
 
             using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, CornerRadius))
             using (SolidBrush fillBrush = new SolidBrush(fill))
-            using (Pen borderPen = new Pen(border))
+            using (Pen borderPen = new Pen(border, 1f))
             {
                 pevent.Graphics.FillPath(fillBrush, path);
-                pevent.Graphics.DrawPath(borderPen, path);
+                if (border != Color.Transparent)
+                {
+                    pevent.Graphics.DrawPath(borderPen, path);
+                }
             }
 
+            Color textColor = !Enabled ? DisabledForeColor : (hover && HoverForeColor != Color.Empty ? HoverForeColor : NormalForeColor);
             TextRenderer.DrawText(
                 pevent.Graphics,
                 Text,
                 Font,
                 ClientRectangle,
-                Enabled ? NormalForeColor : DisabledForeColor,
+                textColor,
                 TextFormatFlags.HorizontalCenter |
                 TextFormatFlags.VerticalCenter |
                 TextFormatFlags.EndEllipsis |
@@ -243,6 +257,8 @@ namespace LocalWebTrayShell
 
     internal sealed class RoundedPanel : Panel
     {
+        private Color borderColor;
+
         public RoundedPanel()
         {
             SetStyle(
@@ -252,12 +268,26 @@ namespace LocalWebTrayShell
                 ControlStyles.UserPaint,
                 true);
             CornerRadius = 8;
-            BorderColor = UiTheme.BorderSoft;
+            borderColor = UiTheme.BorderSoft;
+            BorderWidth = 1f;
         }
 
         public int CornerRadius { get; set; }
 
-        public Color BorderColor { get; set; }
+        public float BorderWidth { get; set; }
+
+        public Color BorderColor
+        {
+            get { return borderColor; }
+            set
+            {
+                if (borderColor != value)
+                {
+                    borderColor = value;
+                    Invalidate();
+                }
+            }
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -269,10 +299,13 @@ namespace LocalWebTrayShell
 
             using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, CornerRadius))
             using (SolidBrush fillBrush = new SolidBrush(BackColor))
-            using (Pen borderPen = new Pen(BorderColor))
+            using (Pen borderPen = new Pen(BorderColor, BorderWidth))
             {
                 e.Graphics.FillPath(fillBrush, path);
-                e.Graphics.DrawPath(borderPen, path);
+                if (BorderColor != Color.Transparent && BorderWidth > 0f)
+                {
+                    e.Graphics.DrawPath(borderPen, path);
+                }
             }
         }
     }
@@ -515,9 +548,10 @@ namespace LocalWebTrayShell
                 : hover || pressed ? UiTheme.TextPrimary : UiTheme.TextSecondary;
 
             e.Graphics.Clear(background);
-            e.Graphics.SmoothingMode = SmoothingMode.None;
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
 
-            using (Pen pen = new Pen(icon, 1.5f))
+            using (Pen pen = new Pen(icon, 1.3f))
             using (SolidBrush brush = new SolidBrush(icon))
             {
                 if (kind == TitleBarButtonKind.Sidebar)

@@ -17,18 +17,20 @@ namespace LocalWebTrayShell
 
         public SiteDialog(SiteEntry initial)
         {
-            DialogUi.StyleForm(this, initial == null ? "\u65b0\u589e\u7ad9\u70b9" : "\u7f16\u8f91\u7ad9\u70b9", new Size(520, 360));
+            string title = initial == null ? "\u65b0\u589e\u7ad9\u70b9" : "\u7f16\u8f91\u7ad9\u70b9";
+            DialogUi.StyleForm(this, title, new Size(540, 440));
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
-            layout.RowCount = 8;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowCount = 9;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f)); // 0: header
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f)); // 1: name label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // 2: name input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f)); // 3: url label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // 4: url input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f)); // 5: proxy check
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // 6: proxy server input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f)); // 7: proxy hint
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f)); // 8: footer
 
             nameTextBox = DialogUi.CreateTextBox(false);
             urlTextBox = DialogUi.CreateTextBox(false);
@@ -40,14 +42,15 @@ namespace LocalWebTrayShell
             saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
 
-            layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 0);
-            layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 1);
-            layout.Controls.Add(DialogUi.CreateLabel("URL"), 0, 2);
-            layout.Controls.Add(DialogUi.CreateInputFrame(urlTextBox, false), 0, 3);
-            layout.Controls.Add(proxyCheckBox, 0, 4);
-            layout.Controls.Add(DialogUi.CreateInputFrame(proxyServerTextBox, false), 0, 5);
-            layout.Controls.Add(DialogUi.CreateSmallLabel("\u652f\u6301 HTTP\u3001HTTPS \u4e0e SOCKS5\uff0c\u4f8b\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080"), 0, 6);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 7);
+            layout.Controls.Add(DialogUi.CreateModalHeader(title, "\u914d\u7f6e Web \u670d\u52a1\u7684\u8bbf\u95ee\u5730\u5740\u53ca\u72ec\u7acb\u7f51\u7edc\u4ee3\u7406"), 0, 0);
+            layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 1);
+            layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 2);
+            layout.Controls.Add(DialogUi.CreateLabel("URL"), 0, 3);
+            layout.Controls.Add(DialogUi.CreateInputFrame(urlTextBox, false), 0, 4);
+            layout.Controls.Add(proxyCheckBox, 0, 5);
+            layout.Controls.Add(DialogUi.CreateInputFrame(proxyServerTextBox, false), 0, 6);
+            layout.Controls.Add(DialogUi.CreateSmallLabel("\u652f\u6301 HTTP\u3001HTTPS \u4e0e SOCKS5\uff0c\u4f8b\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080"), 0, 7);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 8);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -184,24 +187,34 @@ namespace LocalWebTrayShell
 
         public HotkeyDialog(HotkeyConfig initial)
         {
-            DialogUi.StyleForm(this, "\u5feb\u6377\u952e\u8bbe\u7f6e", new Size(440, 270));
+            DialogUi.StyleForm(this, "\u5feb\u6377\u952e\u8bbe\u7f6e", new Size(460, 320));
             KeyPreview = true;
             KeyDown += OnCaptureKeyDown;
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
-            layout.RowCount = 5;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 60f));
+            layout.RowCount = 6;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             comboLabel = new Label();
             comboLabel.Dock = DockStyle.Fill;
-            comboLabel.BackColor = UiTheme.Surface;
-            comboLabel.ForeColor = UiTheme.TextPrimary;
-            comboLabel.Font = new Font("Microsoft YaHei UI", 14f, FontStyle.Regular);
+            comboLabel.BackColor = Color.Transparent;
+            comboLabel.ForeColor = UiTheme.Primary;
+            comboLabel.Font = UiTheme.CreateFont(15f, FontStyle.Bold);
             comboLabel.TextAlign = ContentAlignment.MiddleCenter;
+
+            RoundedPanel comboCard = new RoundedPanel();
+            comboCard.Dock = DockStyle.Fill;
+            comboCard.BackColor = UiTheme.CardBackground;
+            comboCard.BorderColor = UiTheme.Border;
+            comboCard.BorderWidth = 1.5f;
+            comboCard.CornerRadius = 8;
+            comboCard.Margin = new Padding(0, 0, 0, 6);
+            comboCard.Controls.Add(comboLabel);
 
             enableCheckBox = DialogUi.CreateCheckBox("\u542f\u7528\u5168\u5c40\u5feb\u6377\u952e\uff08\u6258\u76d8\u540e\u53f0\u4e5f\u751f\u6548\uff09");
             enableCheckBox.Dock = DockStyle.Fill;
@@ -209,11 +222,12 @@ namespace LocalWebTrayShell
             saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
 
-            layout.Controls.Add(DialogUi.CreateLabel("\u8bf7\u76f4\u63a5\u6309\u4e0b\u7ec4\u5408\u952e\uff08\u5982 Ctrl + `\uff09"), 0, 0);
-            layout.Controls.Add(comboLabel, 0, 1);
-            layout.Controls.Add(DialogUi.CreateSmallLabel("\u9700\u5305\u542b Ctrl \u6216 Alt \u4e4b\u4e00\uff1bWin \u952e\u6682\u4e0d\u652f\u6301"), 0, 2);
-            layout.Controls.Add(enableCheckBox, 0, 3);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 4);
+            layout.Controls.Add(DialogUi.CreateModalHeader("\u5feb\u6377\u952e\u8bbe\u7f6e", "\u8bbe\u7f6e\u547c\u51fa\u6216\u9690\u85cf\u4e3b\u7a97\u53e3\u7684\u5168\u5c40\u70ed\u952e"), 0, 0);
+            layout.Controls.Add(DialogUi.CreateLabel("\u8bf7\u76f4\u63a5\u6309\u4e0b\u7ec4\u5408\u952e\uff08\u5982 Ctrl + `\uff09"), 0, 1);
+            layout.Controls.Add(comboCard, 0, 2);
+            layout.Controls.Add(DialogUi.CreateSmallLabel("\u9700\u5305\u542b Ctrl \u6216 Alt \u4e4b\u4e00\uff1bWin \u952e\u6682\u4e0d\u652f\u6301"), 0, 3);
+            layout.Controls.Add(enableCheckBox, 0, 4);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 5);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -289,12 +303,12 @@ namespace LocalWebTrayShell
             if (!hasCapture)
             {
                 comboLabel.Text = "\uff08\u8bf7\u6309\u4e0b\u7ec4\u5408\u952e\uff09";
-                comboLabel.ForeColor = UiTheme.TextSecondary;
+                comboLabel.ForeColor = UiTheme.TextMuted;
                 return;
             }
 
             comboLabel.Text = HotkeyConfig.ToDisplayString(capturedModifiers, capturedKey);
-            comboLabel.ForeColor = UiTheme.TextPrimary;
+            comboLabel.ForeColor = UiTheme.Primary;
         }
 
         private bool IsCaptureValid()
@@ -378,25 +392,27 @@ namespace LocalWebTrayShell
                 ? AppConfigStore.CreateDefaultAutoRetry()
                 : initial.AutoRetry;
 
-            DialogUi.StyleForm(this, initial == null ? "\u65b0\u589e\u547d\u4ee4" : "\u7f16\u8f91\u547d\u4ee4", new Size(660, 800));
+            string title = initial == null ? "\u65b0\u589e\u547d\u4ee4" : "\u7f16\u8f91\u547d\u4ee4";
+            DialogUi.StyleForm(this, title, new Size(680, 840));
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
-            layout.RowCount = 12;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 0  name label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));   // 1  name input
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 2  command label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116f));  // 3  command input (multiline)
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 16f));   // 4  spacer
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 70f));   // 5  options panel
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 6  working dir label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 40f));   // 7  working dir input + browse
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 8  environment label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));   // 9  environment input (multiline)
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 150f));  // 10 retry panel
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // 11 footer
+            layout.RowCount = 13;
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));   // 0  header
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 1  name label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));   // 2  name input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 3  command label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116f));  // 4  command input (multiline)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 12f));   // 5  spacer
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));   // 6  options panel
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 7  working dir label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));   // 8  working dir input + browse
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 9  environment label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));   // 10 environment input (multiline)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 146f));  // 11 retry panel
+            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // 12 footer
 
             nameTextBox = DialogUi.CreateTextBox(false);
-            commandTextBox = DialogUi.CreateTextBox(true);
+            commandTextBox = DialogUi.CreateMonospaceTextBox(true);
             commandTextBox.AcceptsReturn = true;
             commandTextBox.ScrollBars = ScrollBars.Vertical;
 
@@ -418,28 +434,30 @@ namespace LocalWebTrayShell
             workingDirectoryTextBox = DialogUi.CreateTextBox(false);
             browseButton = new ThemedButton();
             browseButton.Text = "\u6d4f\u89c8...";
-            browseButton.Size = new Size(80, 30);
+            browseButton.Size = new Size(84, 32);
+            browseButton.CornerRadius = 7;
             UiTheme.StyleSecondaryButton(browseButton);
             browseButton.Click += OnBrowseWorkingDirectoryClicked;
 
-            environmentTextBox = DialogUi.CreateTextBox(true);
+            environmentTextBox = DialogUi.CreateMonospaceTextBox(true);
             environmentTextBox.AcceptsReturn = true;
             environmentTextBox.ScrollBars = ScrollBars.Vertical;
 
             saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
 
-            layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 0);
-            layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 1);
-            layout.Controls.Add(DialogUi.CreateLabel("\u547d\u4ee4"), 0, 2);
-            layout.Controls.Add(DialogUi.CreateInputFrame(commandTextBox, true), 0, 3);
-            layout.Controls.Add(CreateCommandOptionsPanel(), 0, 5);
-            layout.Controls.Add(DialogUi.CreateLabel("\u5de5\u4f5c\u76ee\u5f55"), 0, 6);
-            layout.Controls.Add(CreateWorkingDirectoryPanel(), 0, 7);
-            layout.Controls.Add(DialogUi.CreateLabel("\u73af\u5883\u53d8\u91cf\uff08\u6bcf\u884c KEY=VALUE\uff09"), 0, 8);
-            layout.Controls.Add(DialogUi.CreateInputFrame(environmentTextBox, true), 0, 9);
-            layout.Controls.Add(CreateRetryPanel(), 0, 10);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 11);
+            layout.Controls.Add(DialogUi.CreateModalHeader(title, "\u7ba1\u7406\u5e38\u9a7b\u540e\u53f0\u8fdb\u7a0b\u3001\u542f\u52a8\u53c2\u6570\u53ca\u5f02\u5e38\u81ea\u6108\u7b56\u7565"), 0, 0);
+            layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 1);
+            layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 2);
+            layout.Controls.Add(DialogUi.CreateLabel("\u547d\u4ee4"), 0, 3);
+            layout.Controls.Add(DialogUi.CreateInputFrame(commandTextBox, true), 0, 4);
+            layout.Controls.Add(CreateCommandOptionsPanel(), 0, 6);
+            layout.Controls.Add(DialogUi.CreateLabel("\u5de5\u4f5c\u76ee\u5f55"), 0, 7);
+            layout.Controls.Add(CreateWorkingDirectoryPanel(), 0, 8);
+            layout.Controls.Add(DialogUi.CreateLabel("\u73af\u5883\u53d8\u91cf\uff08\u6bcf\u884c KEY=VALUE\uff09"), 0, 9);
+            layout.Controls.Add(DialogUi.CreateInputFrame(environmentTextBox, true), 0, 10);
+            layout.Controls.Add(CreateRetryPanel(), 0, 11);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 12);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -508,7 +526,7 @@ namespace LocalWebTrayShell
             panel.ColumnCount = 2;
             panel.RowCount = 1;
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 88f));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92f));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             Control frame = DialogUi.CreateInputFrame(workingDirectoryTextBox, false);
@@ -639,7 +657,7 @@ namespace LocalWebTrayShell
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             enabledOnStartCheckBox.Dock = DockStyle.Fill;
-            enabledOnStartCheckBox.Margin = new Padding(18, 8, 0, 0);
+            enabledOnStartCheckBox.Margin = new Padding(18, 6, 0, 0);
 
             panel.Controls.Add(DialogUi.CreateLabel("\u542f\u52a8\u65b9\u5f0f"), 0, 0);
             panel.Controls.Add(DialogUi.CreateComboFrame(runModeComboBox), 0, 1);
@@ -651,30 +669,32 @@ namespace LocalWebTrayShell
         {
             RoundedPanel shell = new RoundedPanel();
             shell.Dock = DockStyle.Fill;
-            shell.Margin = new Padding(0, 0, 0, 12);
-            shell.Padding = new Padding(16, 14, 16, 14);
-            shell.BackColor = UiTheme.Surface;
-            shell.BorderColor = UiTheme.BorderSoft;
+            shell.Margin = new Padding(0, 0, 0, 10);
+            shell.Padding = new Padding(16, 12, 16, 12);
+            shell.BackColor = UiTheme.CardBackground;
+            shell.BorderColor = UiTheme.Border;
+            shell.BorderWidth = 1f;
             shell.CornerRadius = 8;
 
             TableLayoutPanel panel = new TableLayoutPanel();
             panel.Dock = DockStyle.Fill;
             panel.Margin = new Padding(0);
             panel.Padding = new Padding(0);
-            panel.BackColor = UiTheme.Surface;
+            panel.BackColor = UiTheme.CardBackground;
             panel.ColumnCount = 4;
             panel.RowCount = 3;
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 34f));
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             retryEnabledCheckBox.Dock = DockStyle.Fill;
-            retryEnabledCheckBox.Margin = new Padding(0, 0, 0, 4);
-            retryEnabledCheckBox.BackColor = UiTheme.Surface;
+            retryEnabledCheckBox.Margin = new Padding(0, 0, 0, 2);
+            retryEnabledCheckBox.BackColor = UiTheme.CardBackground;
+            retryEnabledCheckBox.Font = UiTheme.CreateFont(9f, FontStyle.Bold);
 
             panel.Controls.Add(retryEnabledCheckBox, 0, 0);
             panel.SetColumnSpan(retryEnabledCheckBox, 4);
@@ -792,8 +812,46 @@ namespace LocalWebTrayShell
             form.ShowInTaskbar = false;
             form.ClientSize = clientSize;
             form.BackColor = UiTheme.WindowBackground;
-            form.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            form.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
             form.AutoScaleMode = AutoScaleMode.Dpi;
+        }
+
+        public static Control CreateModalHeader(string title, string subtitle)
+        {
+            Panel headerPanel = new Panel();
+            headerPanel.Dock = DockStyle.Fill;
+            headerPanel.Margin = new Padding(0, 0, 0, 12);
+            headerPanel.Height = 56;
+
+            Label titleLabel = new Label();
+            titleLabel.Text = title;
+            titleLabel.Font = UiTheme.CreateFont(13f, FontStyle.Bold);
+            titleLabel.ForeColor = UiTheme.TextPrimary;
+            titleLabel.AutoSize = false;
+            titleLabel.Dock = DockStyle.Top;
+            titleLabel.Height = 28;
+            titleLabel.TextAlign = ContentAlignment.MiddleLeft;
+
+            Label subtitleLabel = new Label();
+            subtitleLabel.Text = subtitle;
+            subtitleLabel.Font = UiTheme.CreateFont(8.75f, FontStyle.Regular);
+            subtitleLabel.ForeColor = UiTheme.TextMuted;
+            subtitleLabel.AutoSize = false;
+            subtitleLabel.Dock = DockStyle.Top;
+            subtitleLabel.Height = 22;
+            subtitleLabel.TextAlign = ContentAlignment.MiddleLeft;
+
+            headerPanel.Paint += delegate(object sender, PaintEventArgs e)
+            {
+                using (Pen pen = new Pen(UiTheme.BorderSoft, 1f))
+                {
+                    e.Graphics.DrawLine(pen, 0, headerPanel.Height - 1, headerPanel.Width, headerPanel.Height - 1);
+                }
+            };
+
+            headerPanel.Controls.Add(subtitleLabel);
+            headerPanel.Controls.Add(titleLabel);
+            return headerPanel;
         }
 
         public static TableLayoutPanel CreateLayout()
@@ -801,7 +859,7 @@ namespace LocalWebTrayShell
             TableLayoutPanel layout = new TableLayoutPanel();
             layout.Dock = DockStyle.Fill;
             layout.Margin = new Padding(0);
-            layout.Padding = new Padding(20);
+            layout.Padding = new Padding(24, 18, 24, 20);
             layout.BackColor = UiTheme.WindowBackground;
             layout.ColumnCount = 1;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -810,7 +868,13 @@ namespace LocalWebTrayShell
 
         public static Label CreateLabel(string text)
         {
-            Label label = CreateSmallLabel(text);
+            Label label = new Label();
+            label.Text = text;
+            label.AutoSize = false;
+            label.Dock = DockStyle.Fill;
+            label.ForeColor = UiTheme.TextPrimary;
+            label.Font = UiTheme.CreateFont(9f, FontStyle.Bold);
+            label.Margin = new Padding(0);
             label.TextAlign = ContentAlignment.BottomLeft;
             return label;
         }
@@ -821,8 +885,8 @@ namespace LocalWebTrayShell
             label.Text = text;
             label.AutoSize = false;
             label.Dock = DockStyle.Fill;
-            label.ForeColor = UiTheme.TextSecondary;
-            label.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            label.ForeColor = UiTheme.TextMuted;
+            label.Font = UiTheme.CreateFont(8.5f, FontStyle.Regular);
             label.Margin = new Padding(0);
             label.TextAlign = ContentAlignment.MiddleLeft;
             return label;
@@ -835,8 +899,15 @@ namespace LocalWebTrayShell
             textBox.Multiline = multiline;
             textBox.BackColor = UiTheme.Surface;
             textBox.ForeColor = UiTheme.TextPrimary;
-            textBox.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
+            textBox.Font = UiTheme.CreateFont(9.5f, FontStyle.Regular);
             textBox.Dock = DockStyle.Fill;
+            return textBox;
+        }
+
+        public static TextBox CreateMonospaceTextBox(bool multiline)
+        {
+            TextBox textBox = CreateTextBox(multiline);
+            textBox.Font = UiTheme.CreateMonospaceFont(9.5f, FontStyle.Regular);
             return textBox;
         }
 
@@ -844,12 +915,26 @@ namespace LocalWebTrayShell
         {
             RoundedPanel frame = new RoundedPanel();
             frame.Dock = DockStyle.Fill;
-            frame.Margin = new Padding(0, 0, 0, 6);
-            frame.Padding = multiline ? new Padding(11, 10, 11, 10) : new Padding(11, 9, 11, 6);
+            frame.Margin = new Padding(0, 0, 0, 8);
+            frame.Padding = multiline ? new Padding(12, 10, 12, 10) : new Padding(12, 9, 12, 6);
             frame.BackColor = UiTheme.Surface;
-            frame.BorderColor = UiTheme.BorderSoft;
-            frame.CornerRadius = 8;
+            frame.BorderColor = UiTheme.Border;
+            frame.BorderWidth = 1f;
+            frame.CornerRadius = 7;
             frame.Controls.Add(textBox);
+
+            textBox.Enter += delegate
+            {
+                frame.BorderColor = UiTheme.FocusRing;
+                frame.BorderWidth = 1.5f;
+            };
+
+            textBox.Leave += delegate
+            {
+                frame.BorderColor = UiTheme.Border;
+                frame.BorderWidth = 1f;
+            };
+
             return frame;
         }
 
@@ -860,7 +945,7 @@ namespace LocalWebTrayShell
             comboBox.FlatStyle = FlatStyle.Flat;
             comboBox.BackColor = UiTheme.Surface;
             comboBox.ForeColor = UiTheme.TextPrimary;
-            comboBox.Font = new Font("Microsoft YaHei UI", 9.5f, FontStyle.Regular);
+            comboBox.Font = UiTheme.CreateFont(9.5f, FontStyle.Regular);
             comboBox.Dock = DockStyle.Fill;
             return comboBox;
         }
@@ -869,12 +954,26 @@ namespace LocalWebTrayShell
         {
             RoundedPanel frame = new RoundedPanel();
             frame.Dock = DockStyle.Fill;
-            frame.Margin = new Padding(0, 0, 0, 6);
-            frame.Padding = new Padding(9, 6, 9, 4);
+            frame.Margin = new Padding(0, 0, 0, 8);
+            frame.Padding = new Padding(10, 7, 10, 5);
             frame.BackColor = UiTheme.Surface;
-            frame.BorderColor = UiTheme.BorderSoft;
-            frame.CornerRadius = 8;
+            frame.BorderColor = UiTheme.Border;
+            frame.BorderWidth = 1f;
+            frame.CornerRadius = 7;
             frame.Controls.Add(comboBox);
+
+            comboBox.Enter += delegate
+            {
+                frame.BorderColor = UiTheme.FocusRing;
+                frame.BorderWidth = 1.5f;
+            };
+
+            comboBox.Leave += delegate
+            {
+                frame.BorderColor = UiTheme.Border;
+                frame.BorderWidth = 1f;
+            };
+
             return frame;
         }
 
@@ -887,7 +986,7 @@ namespace LocalWebTrayShell
             control.BorderStyle = BorderStyle.FixedSingle;
             control.BackColor = UiTheme.Surface;
             control.ForeColor = UiTheme.TextPrimary;
-            control.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular);
+            control.Font = UiTheme.CreateFont(9.25f, FontStyle.Regular);
             return control;
         }
 
@@ -896,9 +995,9 @@ namespace LocalWebTrayShell
             CheckBox checkBox = new CheckBox();
             checkBox.Text = text;
             checkBox.AutoSize = false;
-            checkBox.ForeColor = UiTheme.TextSecondary;
+            checkBox.ForeColor = UiTheme.TextPrimary;
             checkBox.BackColor = UiTheme.WindowBackground;
-            checkBox.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            checkBox.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
             checkBox.TextAlign = ContentAlignment.MiddleLeft;
             return checkBox;
         }
@@ -907,7 +1006,9 @@ namespace LocalWebTrayShell
         {
             ThemedButton button = new ThemedButton();
             button.Text = text;
-            button.Size = new Size(96, 34);
+            button.Size = new Size(100, 36);
+            button.Font = UiTheme.CreateFont(9.5f, FontStyle.Bold);
+            button.CornerRadius = 8;
             button.Click += clickHandler;
             UiTheme.StylePrimaryButton(button);
             return button;
@@ -917,7 +1018,9 @@ namespace LocalWebTrayShell
         {
             ThemedButton button = new ThemedButton();
             button.Text = "\u53d6\u6d88";
-            button.Size = new Size(96, 34);
+            button.Size = new Size(100, 36);
+            button.Font = UiTheme.CreateFont(9.5f, FontStyle.Regular);
+            button.CornerRadius = 8;
             button.DialogResult = DialogResult.Cancel;
             UiTheme.StyleSecondaryButton(button);
             return button;
@@ -929,11 +1032,11 @@ namespace LocalWebTrayShell
             footer.Dock = DockStyle.Fill;
             footer.FlowDirection = FlowDirection.RightToLeft;
             footer.WrapContents = false;
-            footer.Padding = new Padding(0, 8, 0, 0);
+            footer.Padding = new Padding(0, 10, 0, 0);
             footer.Margin = new Padding(0);
             footer.BackColor = UiTheme.WindowBackground;
-            cancelButton.Margin = new Padding(8, 0, 0, 0);
-            saveButton.Margin = new Padding(8, 0, 0, 0);
+            cancelButton.Margin = new Padding(10, 0, 0, 0);
+            saveButton.Margin = new Padding(0);
             footer.Controls.Add(cancelButton);
             footer.Controls.Add(saveButton);
             return footer;

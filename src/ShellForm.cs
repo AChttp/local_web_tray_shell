@@ -213,7 +213,7 @@ namespace LocalWebTrayShell
             titleBarLabel = new Label();
             titleBarLabel.AutoSize = false;
             titleBarLabel.TextAlign = ContentAlignment.MiddleLeft;
-            titleBarLabel.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            titleBarLabel.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
             titleBarLabel.ForeColor = UiTheme.TextSecondary;
             titleBarLabel.BackColor = UiTheme.WindowBackground;
             titleBarLabel.MouseDown += OnTitleBarMouseDown;
@@ -360,18 +360,31 @@ namespace LocalWebTrayShell
             RoundedPanel urlFrame = new RoundedPanel();
             urlFrame.Dock = DockStyle.Fill;
             urlFrame.Margin = new Padding(6, 0, 6, 0);
-            urlFrame.Padding = new Padding(10, 6, 10, 6);
+            urlFrame.Padding = new Padding(12, 7, 12, 6);
             urlFrame.BackColor = UiTheme.SecondaryBack;
-            urlFrame.BorderColor = UiTheme.BorderSoft;
-            urlFrame.CornerRadius = 6;
+            urlFrame.BorderColor = UiTheme.Border;
+            urlFrame.BorderWidth = 1f;
+            urlFrame.CornerRadius = 7;
 
             webUrlTextBox = new TextBox();
             webUrlTextBox.Dock = DockStyle.Fill;
             webUrlTextBox.BorderStyle = BorderStyle.None;
             webUrlTextBox.BackColor = UiTheme.SecondaryBack;
             webUrlTextBox.ForeColor = UiTheme.TextPrimary;
-            webUrlTextBox.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            webUrlTextBox.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
             webUrlTextBox.KeyDown += OnWebUrlTextBoxKeyDown;
+
+            webUrlTextBox.Enter += delegate
+            {
+                urlFrame.BorderColor = UiTheme.FocusRing;
+                urlFrame.BorderWidth = 1.5f;
+            };
+
+            webUrlTextBox.Leave += delegate
+            {
+                urlFrame.BorderColor = UiTheme.Border;
+                urlFrame.BorderWidth = 1f;
+            };
 
             urlFrame.Controls.Add(webUrlTextBox);
 
@@ -404,14 +417,14 @@ namespace LocalWebTrayShell
 
             webStateTitleLabel = new Label();
             webStateTitleLabel.Dock = DockStyle.Fill;
-            webStateTitleLabel.Font = new Font("Microsoft YaHei UI", 13f, FontStyle.Bold);
+            webStateTitleLabel.Font = UiTheme.CreateFont(13f, FontStyle.Bold);
             webStateTitleLabel.ForeColor = UiTheme.TextPrimary;
             webStateTitleLabel.TextAlign = ContentAlignment.BottomCenter;
             webStateTitleLabel.Text = "\u6b63\u5728\u51c6\u5907\u7f51\u9875\u5de5\u4f5c\u533a";
 
             webStateDetailLabel = new Label();
             webStateDetailLabel.Dock = DockStyle.Fill;
-            webStateDetailLabel.Font = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Regular);
+            webStateDetailLabel.Font = UiTheme.CreateFont(9.25f, FontStyle.Regular);
             webStateDetailLabel.ForeColor = UiTheme.TextSecondary;
             webStateDetailLabel.TextAlign = ContentAlignment.TopCenter;
             webStateDetailLabel.AutoEllipsis = true;
@@ -438,7 +451,7 @@ namespace LocalWebTrayShell
 
             currentCommandLabel = new Label();
             currentCommandLabel.Text = "\u672a\u9009\u62e9\u547d\u4ee4";
-            currentCommandLabel.Font = new Font("Microsoft YaHei UI", 11.5f, FontStyle.Bold);
+            currentCommandLabel.Font = UiTheme.CreateFont(11.5f, FontStyle.Bold);
             currentCommandLabel.ForeColor = UiTheme.TextPrimary;
             currentCommandLabel.AutoSize = true;
             currentCommandLabel.Dock = DockStyle.Fill;
@@ -460,7 +473,7 @@ namespace LocalWebTrayShell
             autoScrollLogsCheckBox.Text = "\u81ea\u52a8\u6eda\u52a8";
             autoScrollLogsCheckBox.Checked = true;
             autoScrollLogsCheckBox.AutoSize = true;
-            autoScrollLogsCheckBox.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
+            autoScrollLogsCheckBox.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
             autoScrollLogsCheckBox.ForeColor = UiTheme.TextSecondary;
             autoScrollLogsCheckBox.Location = new Point(0, 8);
             autoScrollLogsCheckBox.CheckedChanged += OnAutoScrollLogsChanged;
@@ -496,7 +509,7 @@ namespace LocalWebTrayShell
             logsTextBox.WordWrap = false;
             logsTextBox.BackColor = UiTheme.TerminalBackground;
             logsTextBox.ForeColor = UiTheme.TerminalForeground;
-            logsTextBox.Font = new Font("Cascadia Mono", 10f, FontStyle.Regular);
+            logsTextBox.Font = UiTheme.CreateMonospaceFont(10f, FontStyle.Regular);
 
             logsPanel.Controls.Add(logsTextBox);
             logsPanel.Controls.Add(logsToolbar);
@@ -2115,15 +2128,17 @@ namespace LocalWebTrayShell
         {
             ThemedButton button = new ThemedButton();
             button.Text = text;
-            button.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
-            button.CornerRadius = 4;
-            button.NormalBackColor = UiTheme.SecondaryBack;
+            button.Font = UiTheme.CreateFont(9.5f, FontStyle.Regular);
+            button.CornerRadius = 6;
+            button.NormalBackColor = Color.Transparent;
             button.HoverBackColor = UiTheme.SecondaryHover;
             button.PressedBackColor = UiTheme.SecondaryPressed;
-            button.DisabledBackColor = UiTheme.SecondaryDisabled;
-            button.NormalForeColor = UiTheme.TextPrimary;
+            button.DisabledBackColor = Color.Transparent;
+            button.NormalForeColor = UiTheme.TextSecondary;
+            button.HoverForeColor = UiTheme.TextPrimary;
             button.DisabledForeColor = UiTheme.TextDisabled;
-            button.BorderColor = UiTheme.BorderSoft;
+            button.BorderColor = Color.Transparent;
+            button.HoverBorderColor = UiTheme.BorderSoft;
             button.Padding = new Padding(0);
 
             if (!string.IsNullOrEmpty(tooltipText))

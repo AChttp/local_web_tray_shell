@@ -154,13 +154,13 @@ namespace LocalWebTrayShell
             commands = new List<CommandEntry>();
             sites = new List<SiteEntry>();
             hitRects = new Dictionary<string, Rectangle>(StringComparer.OrdinalIgnoreCase);
-            appTitleFont = new Font("Microsoft YaHei UI", 13.5f, FontStyle.Bold);
-            sectionTitleFont = new Font("Microsoft YaHei UI", 11f, FontStyle.Bold);
-            buttonFont = new Font("Microsoft YaHei UI", 9f, FontStyle.Bold);
-            itemTitleFont = new Font("Microsoft YaHei UI", 9.25f, FontStyle.Bold);
-            itemMetaFont = new Font("Microsoft YaHei UI", 8.4f, FontStyle.Regular);
-            summaryFont = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Regular);
-            badgeFont = new Font("Microsoft YaHei UI", 8.75f, FontStyle.Bold);
+            appTitleFont = UiTheme.CreateFont(13.5f, FontStyle.Bold);
+            sectionTitleFont = UiTheme.CreateFont(11f, FontStyle.Bold);
+            buttonFont = UiTheme.CreateFont(9f, FontStyle.Bold);
+            itemTitleFont = UiTheme.CreateFont(9.25f, FontStyle.Bold);
+            itemMetaFont = UiTheme.CreateFont(8.4f, FontStyle.Regular);
+            summaryFont = UiTheme.CreateFont(8.75f, FontStyle.Regular);
+            badgeFont = UiTheme.CreateFont(8.25f, FontStyle.Bold);
 
             BackColor = UiTheme.SidebarBackground;
             Cursor = Cursors.Default;
@@ -370,6 +370,8 @@ namespace LocalWebTrayShell
                 Math.Max(0, content.Bottom - splitterRect.Bottom));
 
             e.Graphics.Clear(BackColor);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+            e.Graphics.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             hitRects.Clear();
             DrawBrand(e.Graphics, brand);
             DrawCommandSection(e.Graphics, commandSection);
@@ -861,20 +863,13 @@ namespace LocalWebTrayShell
             Rectangle title = new Rectangle(inner.X, inner.Y, titleWidth, 42);
             Rectangle stop = new Rectangle(inner.Right - stopWidth, inner.Y + 2, stopWidth, 34);
             Rectangle summary = new Rectangle(inner.X, inner.Y + 52, inner.Width, 34);
-            Rectangle actionRow = new Rectangle(inner.X, inner.Y + 90, inner.Width, 34);
-            int gap = actionRow.Width < 260 ? 8 : 10;
-            int buttonWidth = Math.Max(0, (actionRow.Width - (gap * 2)) / 3);
-            int x = actionRow.X;
+            Rectangle actionRow = new Rectangle(inner.X, inner.Y + 92, inner.Width, 36);
 
             TextRenderer.DrawText(graphics, "Switch \u63a7\u5236\u53f0", appTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
-            DrawButton(graphics, stop, "\u5168\u90e8\u505c\u6b62", false, true, "stop-all");
+            DrawDangerButton(graphics, stop, "\u5168\u90e8\u505c\u6b62", "stop-all");
             TextRenderer.DrawText(graphics, SummaryText ?? string.Empty, summaryFont, summary, UiTheme.TextSecondary, TextFlags(ContentAlignment.TopLeft) | TextFormatFlags.EndEllipsis);
 
-            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u7f51\u9875", WorkspaceMode == WorkspaceMode.Web, "mode-web");
-            x += buttonWidth + gap;
-            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, buttonWidth, actionRow.Height), "\u5206\u5c4f", WorkspaceMode == WorkspaceMode.Split, "mode-split");
-            x += buttonWidth + gap;
-            DrawSegmentButton(graphics, new Rectangle(x, actionRow.Y, Math.Max(0, actionRow.Right - x), actionRow.Height), "\u65e5\u5fd7", WorkspaceMode == WorkspaceMode.Logs, "mode-logs");
+            DrawSegmentControl(graphics, actionRow);
         }
 
         private void DrawCommandSection(Graphics graphics, Rectangle section)
@@ -976,8 +971,8 @@ namespace LocalWebTrayShell
             Color accent = GetStatusAccent(status);
             bool selected = command != null && string.Equals(command.Id, SelectedCommandId, StringComparison.OrdinalIgnoreCase);
             bool itemHovered = IsItemHovered("cmd", index);
-            Color fill = selected ? Color.FromArgb(221, 239, 247) : itemHovered ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
-            Color border = selected ? Color.FromArgb(90, 166, 194) : itemHovered ? Blend(UiTheme.Border, accent, 0.18f) : UiTheme.Border;
+            Color fill = selected ? Color.FromArgb(240, 249, 255) : itemHovered ? Color.FromArgb(248, 250, 252) : UiTheme.Surface;
+            Color border = selected ? UiTheme.Primary : itemHovered ? Color.FromArgb(186, 230, 253) : UiTheme.Border;
             int contentRight = bounds.Right - ReorderColumnWidth - 4;
             Rectangle badge = new Rectangle(contentRight - 76, bounds.Y + 9, 76, 23);
             int titleRight = badge.X - 6;
@@ -1038,16 +1033,16 @@ namespace LocalWebTrayShell
             {
                 fill = hover ? Color.FromArgb(224, 242, 254) : UiTheme.SecondaryBack;
                 border = hover ? UiTheme.Primary : UiTheme.BorderSoft;
-                iconColor = hover ? Color.FromArgb(14, 116, 144) : UiTheme.Primary;
+                iconColor = hover ? Color.FromArgb(2, 132, 199) : UiTheme.Primary;
             }
             else
             {
-                fill = hover ? Color.FromArgb(238, 242, 246) : UiTheme.SecondaryBack;
+                fill = hover ? Color.FromArgb(241, 245, 249) : UiTheme.SecondaryBack;
                 border = hover ? UiTheme.Primary : UiTheme.BorderSoft;
                 iconColor = hover ? UiTheme.Primary : UiTheme.TextSecondary;
             }
 
-            DrawRoundedFill(graphics, bounds, fill, border, 4);
+            DrawRoundedFill(graphics, bounds, fill, border, 5);
 
             SmoothingMode oldMode = graphics.SmoothingMode;
             graphics.SmoothingMode = SmoothingMode.AntiAlias;
@@ -1108,8 +1103,8 @@ namespace LocalWebTrayShell
             Color accent = GetSiteAccent(health);
             bool selected = site != null && string.Equals(site.Id, SelectedSiteId, StringComparison.OrdinalIgnoreCase);
             bool itemHovered = IsItemHovered("site", index);
-            Color fill = selected ? Color.FromArgb(232, 244, 252) : itemHovered ? Blend(UiTheme.Surface, accent, 0.06f) : UiTheme.Surface;
-            Color border = selected ? UiTheme.Primary : itemHovered ? Blend(UiTheme.Border, accent, 0.22f) : UiTheme.Border;
+            Color fill = selected ? Color.FromArgb(240, 249, 255) : itemHovered ? Color.FromArgb(248, 250, 252) : UiTheme.Surface;
+            Color border = selected ? UiTheme.Primary : itemHovered ? Color.FromArgb(186, 230, 253) : UiTheme.Border;
 
             DrawCard(graphics, bounds, fill, border);
             DrawRoundedFill(graphics, new Rectangle(bounds.X + 10, bounds.Y + 10, 5, Math.Max(10, bounds.Height - 20)), accent, accent, 2);
@@ -1198,12 +1193,52 @@ namespace LocalWebTrayShell
             DrawButton(graphics, new Rectangle(x, y, Math.Max(0, bounds.Right - x), buttonHeight), second.Text, second.Primary, second.Enabled, second.Key);
         }
 
-        private void DrawSegmentButton(Graphics graphics, Rectangle bounds, string text, bool active, string key)
+        private void DrawSegmentControl(Graphics graphics, Rectangle bounds)
+        {
+            DrawRoundedFill(graphics, bounds, Color.FromArgb(238, 242, 246), Color.FromArgb(226, 232, 240), 8);
+
+            int padding = 3;
+            Rectangle inner = new Rectangle(bounds.X + padding, bounds.Y + padding, bounds.Width - (padding * 2), bounds.Height - (padding * 2));
+            int segmentWidth = inner.Width / 3;
+
+            Rectangle webRect = new Rectangle(inner.X, inner.Y, segmentWidth, inner.Height);
+            Rectangle splitRect = new Rectangle(webRect.Right, inner.Y, segmentWidth, inner.Height);
+            Rectangle logsRect = new Rectangle(splitRect.Right, inner.Y, Math.Max(0, inner.Right - splitRect.Right), inner.Height);
+
+            DrawSegmentPill(graphics, webRect, "\u7f51\u9875", WorkspaceMode == WorkspaceMode.Web, "mode-web");
+            DrawSegmentPill(graphics, splitRect, "\u5206\u5c4f", WorkspaceMode == WorkspaceMode.Split, "mode-split");
+            DrawSegmentPill(graphics, logsRect, "\u65e5\u5fd7", WorkspaceMode == WorkspaceMode.Logs, "mode-logs");
+        }
+
+        private void DrawSegmentPill(Graphics graphics, Rectangle bounds, string text, bool active, string key)
         {
             bool hover = string.Equals(hoverKey, key, StringComparison.OrdinalIgnoreCase);
-            Color fill = active ? (hover ? UiTheme.SegmentActiveHover : UiTheme.SegmentActive) : (hover ? UiTheme.SegmentInactiveHover : UiTheme.SegmentInactive);
-            Color fore = active ? Color.White : UiTheme.TextSecondary;
-            DrawRoundedFill(graphics, bounds, fill, active ? UiTheme.SegmentActive : Color.FromArgb(202, 216, 231), 6);
+
+            if (active)
+            {
+                DrawRoundedFill(graphics, bounds, Color.White, Color.FromArgb(218, 225, 233), 6);
+                TextRenderer.DrawText(graphics, text, buttonFont, bounds, UiTheme.Primary, TextFlags(ContentAlignment.MiddleCenter));
+            }
+            else
+            {
+                if (hover)
+                {
+                    DrawRoundedFill(graphics, bounds, Color.FromArgb(248, 250, 252), Color.Transparent, 6);
+                }
+                TextRenderer.DrawText(graphics, text, buttonFont, bounds, hover ? UiTheme.TextPrimary : UiTheme.TextSecondary, TextFlags(ContentAlignment.MiddleCenter));
+            }
+
+            hitRects[key] = bounds;
+        }
+
+        private void DrawDangerButton(Graphics graphics, Rectangle bounds, string text, string key)
+        {
+            bool hover = string.Equals(hoverKey, key, StringComparison.OrdinalIgnoreCase);
+            Color fill = hover ? UiTheme.DangerBackgroundHover : UiTheme.DangerBackground;
+            Color border = hover ? UiTheme.DangerBorderHover : UiTheme.DangerBorder;
+            Color fore = hover ? Color.FromArgb(153, 27, 27) : UiTheme.DangerForeground;
+
+            DrawRoundedFill(graphics, bounds, fill, border, 7);
             TextRenderer.DrawText(graphics, text, buttonFont, bounds, fore, TextFlags(ContentAlignment.MiddleCenter));
             hitRects[key] = bounds;
         }
@@ -1212,10 +1247,10 @@ namespace LocalWebTrayShell
         {
             bool hover = enabled && string.Equals(hoverKey, key, StringComparison.OrdinalIgnoreCase);
             Color fill = !enabled ? UiTheme.SecondaryDisabled : primary ? (hover ? UiTheme.PrimaryHover : UiTheme.Primary) : (hover ? UiTheme.SecondaryHover : UiTheme.SecondaryBack);
-            Color border = !enabled ? UiTheme.BorderSoft : primary ? Color.FromArgb(0, 98, 132) : UiTheme.Border;
-            Color fore = !enabled ? UiTheme.SecondaryDisabledText : primary ? Color.White : UiTheme.TextSecondary;
+            Color border = !enabled ? UiTheme.BorderSoft : primary ? UiTheme.Primary : (hover ? UiTheme.FocusRing : UiTheme.Border);
+            Color fore = !enabled ? UiTheme.SecondaryDisabledText : primary ? Color.White : (hover ? UiTheme.TextPrimary : UiTheme.TextSecondary);
 
-            DrawRoundedFill(graphics, bounds, fill, border, 6);
+            DrawRoundedFill(graphics, bounds, fill, border, 7);
             TextRenderer.DrawText(graphics, text, buttonFont, bounds, fore, TextFlags(ContentAlignment.MiddleCenter));
 
             if (enabled)
