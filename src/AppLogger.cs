@@ -91,8 +91,9 @@ namespace LocalWebTrayShell
 
         public static void Flush()
         {
-            // Nothing to do: every Write already hit the disk. Kept so callers can
-            // express intent on shutdown without a no-op refactor later.
+            lock (syncRoot)
+            {
+            }
         }
 
         private static void Write(string level, string category, string message)
@@ -102,9 +103,14 @@ namespace LocalWebTrayShell
                 return;
             }
 
-            WriteRaw(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture) +
+            string line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture) +
                 " [" + level + "] [" + (category ?? "?") + "] " +
-                (message ?? string.Empty).Replace("\r", "\\r").Replace("\n", "\\n"));
+                (message ?? string.Empty).Replace("\r", "\\r").Replace("\n", "\\n");
+
+            ThreadPool.QueueUserWorkItem(delegate
+            {
+                WriteRaw(line);
+            });
         }
 
         // Appends one line (newline added) to the current session file. Assumes the

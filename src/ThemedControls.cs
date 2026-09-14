@@ -227,6 +227,20 @@ namespace LocalWebTrayShell
         }
     }
 
+    internal class DoubleBufferedPanel : Panel
+    {
+        public DoubleBufferedPanel()
+        {
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw,
+                true);
+            DoubleBuffered = true;
+            UpdateStyles();
+        }
+    }
+
     internal sealed class RoundedPanel : Panel
     {
         public RoundedPanel()

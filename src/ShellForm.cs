@@ -41,6 +41,13 @@ namespace LocalWebTrayShell
         private const int WS_SYSMENU = 0x00080000;
         private const int WS_MINIMIZEBOX = 0x00020000;
         private const int WS_MAXIMIZEBOX = 0x00010000;
+        private const int WS_CLIPCHILDREN = 0x02000000;
+        private const int WS_CLIPSIBLINGS = 0x04000000;
+        private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
+        private const int WM_ERASEBKGND = 0x0014;
+
+        [DllImport("dwmapi.dll", PreserveSig = true)]
+        private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
@@ -58,31 +65,31 @@ namespace LocalWebTrayShell
         private readonly ContextMenuStrip trayMenu;
         private readonly StatusStrip statusStrip;
         private readonly ToolStripStatusLabel statusLabel;
-        private readonly Panel titleBarPanel;
+        private readonly DoubleBufferedPanel titleBarPanel;
         private readonly TitleBarIconButton titleSidebarButton;
         private readonly Label titleBarLabel;
         private readonly TitleBarIconButton minimizeButton;
         private readonly TitleBarIconButton maximizeButton;
         private readonly TitleBarIconButton closeButton;
-        private readonly Panel rootPanel;
-        private readonly Panel leftSidebar;
+        private readonly DoubleBufferedPanel rootPanel;
+        private readonly DoubleBufferedPanel leftSidebar;
         private readonly SidebarSurfaceControl sidebarSurface;
         private readonly SidebarSplitterPanel sidebarSplitter;
-        private readonly Panel workspacePanel;
-        private readonly Panel rightBody;
-        private readonly Panel webPanel;
-        private readonly Panel logsPanel;
+        private readonly DoubleBufferedPanel workspacePanel;
+        private readonly DoubleBufferedPanel rightBody;
+        private readonly DoubleBufferedPanel webPanel;
+        private readonly DoubleBufferedPanel logsPanel;
         private readonly Label webStateTitleLabel;
         private readonly Label webStateDetailLabel;
         private readonly ThemedButton webStateRetryButton;
-        private readonly Panel webStateOverlay;
+        private readonly DoubleBufferedPanel webStateOverlay;
         private readonly Label currentCommandLabel;
         private readonly RoundedLabel commandStatusBadge;
         private readonly ThemedButton clearLogsButton;
         private readonly ThemedButton copyLogsButton;
         private readonly CheckBox autoScrollLogsCheckBox;
         private readonly TextBox logsTextBox;
-        private readonly Panel webViewHost;
+        private readonly DoubleBufferedPanel webViewHost;
         private readonly Timer uiRefreshTimer;
         private readonly Timer runtimeRefreshTimer;
         private readonly ToolStripMenuItem trayStartupMenuItem;
@@ -127,7 +134,7 @@ namespace LocalWebTrayShell
         private int renderedLogNextSequence;
         private string cachedStartupEnabledText;
         private string lastTrayTooltipText;
-        private readonly Panel webNavBar;
+        private readonly DoubleBufferedPanel webNavBar;
         private readonly ThemedButton webBackButton;
         private readonly ThemedButton webForwardButton;
         private readonly ThemedButton webReloadButton;
@@ -173,11 +180,19 @@ namespace LocalWebTrayShell
             BackColor = UiTheme.WindowBackground;
             preTrayWindowState = WindowState;
 
+            SetStyle(
+                ControlStyles.AllPaintingInWmPaint |
+                ControlStyles.OptimizedDoubleBuffer |
+                ControlStyles.ResizeRedraw |
+                ControlStyles.UserPaint,
+                true);
+            DoubleBuffered = true;
+
             statusLabel = new ToolStripStatusLabel("\u6b63\u5728\u52a0\u8f7d\u5de5\u4f5c\u53f0...");
             statusStrip = new StatusStrip();
             statusStrip.Items.Add(statusLabel);
 
-            titleBarPanel = new Panel();
+            titleBarPanel = new DoubleBufferedPanel();
             titleBarPanel.Dock = DockStyle.Top;
             titleBarPanel.Height = TitleBarHeight;
             titleBarPanel.BackColor = UiTheme.WindowBackground;
@@ -222,14 +237,14 @@ namespace LocalWebTrayShell
             titleBarPanel.Controls.Add(closeButton);
             LayoutTitleBarControls();
 
-            rootPanel = new Panel();
+            rootPanel = new DoubleBufferedPanel();
             rootPanel.Dock = DockStyle.Fill;
             rootPanel.BackColor = BackColor;
             rootPanel.Margin = new Padding(0);
             rootPanel.Padding = new Padding(0);
             rootPanel.Resize += OnRootPanelResize;
 
-            leftSidebar = new Panel();
+            leftSidebar = new DoubleBufferedPanel();
             leftSidebar.Dock = DockStyle.None;
             leftSidebar.Width = DefaultSidebarWidth;
             leftSidebar.BackColor = UiTheme.SidebarBackground;
@@ -265,21 +280,21 @@ namespace LocalWebTrayShell
 
             leftSidebar.Controls.Add(sidebarSurface);
 
-            workspacePanel = new Panel();
+            workspacePanel = new DoubleBufferedPanel();
             workspacePanel.Dock = DockStyle.None;
             workspacePanel.Padding = new Padding(14, 14, 14, 14);
             workspacePanel.BackColor = BackColor;
 
-            rightBody = new Panel();
+            rightBody = new DoubleBufferedPanel();
             rightBody.Dock = DockStyle.None;
             rightBody.Padding = new Padding(0);
 
-            webPanel = new Panel();
+            webPanel = new DoubleBufferedPanel();
             webPanel.Dock = DockStyle.None;
             webPanel.BackColor = UiTheme.Surface;
             webPanel.Padding = new Padding(10);
 
-            webNavBar = new Panel();
+            webNavBar = new DoubleBufferedPanel();
             webNavBar.Dock = DockStyle.Top;
             webNavBar.Height = 36;
             webNavBar.BackColor = UiTheme.Surface;
@@ -343,14 +358,14 @@ namespace LocalWebTrayShell
             urlFrame.Dock = DockStyle.Fill;
             urlFrame.Margin = new Padding(6, 0, 6, 0);
             urlFrame.Padding = new Padding(10, 6, 10, 6);
-            urlFrame.BackColor = Color.FromArgb(244, 248, 252);
+            urlFrame.BackColor = UiTheme.SecondaryBack;
             urlFrame.BorderColor = UiTheme.BorderSoft;
             urlFrame.CornerRadius = 6;
 
             webUrlTextBox = new TextBox();
             webUrlTextBox.Dock = DockStyle.Fill;
             webUrlTextBox.BorderStyle = BorderStyle.None;
-            webUrlTextBox.BackColor = Color.FromArgb(244, 248, 252);
+            webUrlTextBox.BackColor = UiTheme.SecondaryBack;
             webUrlTextBox.ForeColor = UiTheme.TextPrimary;
             webUrlTextBox.Font = new Font("Microsoft YaHei UI", 9f, FontStyle.Regular);
             webUrlTextBox.KeyDown += OnWebUrlTextBoxKeyDown;
@@ -361,13 +376,13 @@ namespace LocalWebTrayShell
             webNavBar.Controls.Add(navRight);
             webNavBar.Controls.Add(navLeft);
 
-            webViewHost = new Panel();
+            webViewHost = new DoubleBufferedPanel();
             webViewHost.Dock = DockStyle.Fill;
-            webViewHost.BackColor = Color.FromArgb(221, 232, 242);
+            webViewHost.BackColor = UiTheme.WindowBackground;
             webViewHost.Padding = new Padding(0);
 
-            webStateOverlay = new Panel();
-            webStateOverlay.BackColor = Color.FromArgb(221, 232, 242);
+            webStateOverlay = new DoubleBufferedPanel();
+            webStateOverlay.BackColor = UiTheme.WindowBackground;
             webStateOverlay.Dock = DockStyle.Fill;
             webStateOverlay.Visible = true;
 
@@ -413,7 +428,7 @@ namespace LocalWebTrayShell
             webPanel.Controls.Add(webNavBar);
             webViewHost.Controls.Add(webStateOverlay);
 
-            logsPanel = new Panel();
+            logsPanel = new DoubleBufferedPanel();
             logsPanel.Dock = DockStyle.None;
             logsPanel.BackColor = UiTheme.Surface;
             logsPanel.Padding = new Padding(12);
@@ -593,6 +608,7 @@ namespace LocalWebTrayShell
             RefreshCommandButtons();
             RefreshSiteButtons();
             UpdateStatusSummary();
+            EnableDoubleBufferingRecursive(this);
         }
 
         protected override CreateParams CreateParams
@@ -600,7 +616,7 @@ namespace LocalWebTrayShell
             get
             {
                 CreateParams createParams = base.CreateParams;
-                createParams.Style |= WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+                createParams.Style |= WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
                 return createParams;
             }
         }
@@ -651,6 +667,12 @@ namespace LocalWebTrayShell
 
         protected override void WndProc(ref Message m)
         {
+            if (m.Msg == WM_ERASEBKGND)
+            {
+                m.Result = new IntPtr(1);
+                return;
+            }
+
             if (!allowExit &&
                 m.Msg == WM_SYSCOMMAND &&
                 ((int)m.WParam & 0xFFF0) == SC_CLOSE)
@@ -1145,6 +1167,11 @@ namespace LocalWebTrayShell
             foreach (Control control in webViewHost.Controls)
             {
                 control.Visible = false;
+            }
+
+            if (!webViewHost.Visible && workspaceMode != WorkspaceMode.Logs)
+            {
+                webViewHost.Visible = true;
             }
 
             state.WebView.Visible = true;
@@ -3394,6 +3421,14 @@ namespace LocalWebTrayShell
                 ? FormWindowState.Normal
                 : WindowState;
             AppLogger.Info("tray", "隐藏到托盘（原状态 " + preTrayWindowState + "）");
+
+            // Hide webViewHost before hiding the form so WebView2's DirectComposition GPU surface
+            // does not composite before the WinForms shell when restored later.
+            if (webViewHost != null && webViewHost.Visible)
+            {
+                webViewHost.Visible = false;
+            }
+
             Hide();
 
             if (trayHintShown)
@@ -3411,22 +3446,101 @@ namespace LocalWebTrayShell
         private void RestoreFromTray()
         {
             hidingToTray = false;
+            if (WindowState == FormWindowState.Minimized)
+            {
+                WindowState = preTrayWindowState;
+            }
+
             if (!Visible)
             {
                 AppLogger.Info("tray", "从托盘恢复主界面");
-                if (WindowState == FormWindowState.Minimized)
+
+                bool shouldShowWeb = (workspaceMode != WorkspaceMode.Logs) && (currentSite != null);
+
+                // Stage 1: Ensure webViewHost is not visible so WebView2's DirectComposition surface
+                // does not pop onto screen before the GDI shell (titlebar, sidebar, navbar) finishes painting.
+                if (webViewHost != null && webViewHost.Visible)
                 {
-                    WindowState = preTrayWindowState;
+                    webViewHost.Visible = false;
                 }
+
+                // Stage 2: Show the form
                 Show();
+
+                // Stage 3: Synchronously flush GDI paints for the shell
+                Refresh();
+                if (titleBarPanel != null)
+                {
+                    titleBarPanel.Refresh();
+                }
+                if (leftSidebar != null)
+                {
+                    leftSidebar.Refresh();
+                }
+                if (sidebarSurface != null)
+                {
+                    sidebarSurface.Refresh();
+                }
+                if (webNavBar != null && webNavBar.Visible)
+                {
+                    webNavBar.Refresh();
+                }
+
+                // Stage 4: Reveal webViewHost seamlessly into the already-rendered shell
+                if (shouldShowWeb && webViewHost != null && !webViewHost.Visible)
+                {
+                    webViewHost.Visible = true;
+                }
             }
+
             Activate();
+            BringToFront();
         }
 
         protected override void OnHandleCreated(EventArgs e)
         {
             base.OnHandleCreated(e);
+            TryDisableWindowTransitions();
             TryRegisterHotkey();
+        }
+
+        private void TryDisableWindowTransitions()
+        {
+            try
+            {
+                int disableTransitions = 1;
+                DwmSetWindowAttribute(Handle, DWMWA_TRANSITIONS_FORCEDISABLED, ref disableTransitions, sizeof(int));
+            }
+            catch
+            {
+            }
+        }
+
+        private static void EnableDoubleBufferingRecursive(Control control)
+        {
+            if (control == null)
+            {
+                return;
+            }
+
+            try
+            {
+                System.Reflection.PropertyInfo prop = typeof(Control).GetProperty(
+                    "DoubleBuffered",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (prop != null)
+                {
+                    prop.SetValue(control, true, null);
+                }
+            }
+            catch
+            {
+            }
+
+            foreach (Control child in control.Controls)
+            {
+                EnableDoubleBufferingRecursive(child);
+            }
         }
 
         protected override void OnHandleDestroyed(EventArgs e)
