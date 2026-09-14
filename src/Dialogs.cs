@@ -10,48 +10,78 @@ namespace LocalWebTrayShell
     {
         private readonly TextBox nameTextBox;
         private readonly TextBox urlTextBox;
+        private readonly CheckBox proxyCheckBox;
+        private readonly TextBox proxyServerTextBox;
         private readonly ThemedButton saveButton;
         private readonly ThemedButton cancelButton;
 
         public SiteDialog(SiteEntry initial)
         {
-            DialogUi.StyleForm(this, initial == null ? "\u65b0\u589e\u7ad9\u70b9" : "\u7f16\u8f91\u7ad9\u70b9", new Size(500, 250));
+            DialogUi.StyleForm(this, initial == null ? "\u65b0\u589e\u7ad9\u70b9" : "\u7f16\u8f91\u7ad9\u70b9", new Size(520, 360));
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
-            layout.RowCount = 6;
+            layout.RowCount = 8;
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 14f));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
             layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             nameTextBox = DialogUi.CreateTextBox(false);
             urlTextBox = DialogUi.CreateTextBox(false);
+            proxyCheckBox = DialogUi.CreateCheckBox("\u4f7f\u7528\u81ea\u5b9a\u4e49\u4ee3\u7406\uff08\u672a\u52fe\u9009\u65f6\u4e3a\u76f4\u8fde\uff09");
+            proxyCheckBox.Dock = DockStyle.Fill;
+
+            proxyServerTextBox = DialogUi.CreateTextBox(false);
 
             saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
 
             layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 0);
             layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 1);
-            layout.Controls.Add(DialogUi.CreateLabel("URL"), 0, 3);
-            layout.Controls.Add(DialogUi.CreateInputFrame(urlTextBox, false), 0, 4);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 5);
+            layout.Controls.Add(DialogUi.CreateLabel("URL"), 0, 2);
+            layout.Controls.Add(DialogUi.CreateInputFrame(urlTextBox, false), 0, 3);
+            layout.Controls.Add(proxyCheckBox, 0, 4);
+            layout.Controls.Add(DialogUi.CreateInputFrame(proxyServerTextBox, false), 0, 5);
+            layout.Controls.Add(DialogUi.CreateSmallLabel("\u652f\u6301 HTTP\u3001HTTPS \u4e0e SOCKS5\uff0c\u4f8b\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080"), 0, 6);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 7);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
             CancelButton = cancelButton;
 
+            Action updateProxyUi = delegate
+            {
+                bool enabled = proxyCheckBox.Checked;
+                proxyServerTextBox.Enabled = enabled;
+                proxyServerTextBox.ForeColor = enabled ? UiTheme.TextPrimary : UiTheme.TextMuted;
+            };
+
+            proxyCheckBox.CheckedChanged += delegate { updateProxyUi(); };
+
             if (initial != null)
             {
                 nameTextBox.Text = initial.Name;
                 urlTextBox.Text = initial.Url;
+                proxyCheckBox.Checked = initial.ProxyEnabled;
+                proxyServerTextBox.Text = initial.ProxyServer ?? string.Empty;
+                updateProxyUi();
+
                 Result = new SiteEntry
                 {
                     Id = initial.Id,
                     Name = initial.Name,
-                    Url = initial.Url
+                    Url = initial.Url,
+                    ProxyEnabled = initial.ProxyEnabled,
+                    ProxyServer = initial.ProxyServer
                 };
+            }
+            else
+            {
+                updateProxyUi();
             }
         }
 
@@ -62,6 +92,8 @@ namespace LocalWebTrayShell
             Uri uri;
             string name = nameTextBox.Text == null ? string.Empty : nameTextBox.Text.Trim();
             string url = urlTextBox.Text == null ? string.Empty : urlTextBox.Text.Trim();
+            string proxyServer = proxyServerTextBox.Text == null ? string.Empty : proxyServerTextBox.Text.Trim();
+            bool proxyEnabled = proxyCheckBox.Checked;
 
             if (string.IsNullOrWhiteSpace(url))
             {
@@ -85,6 +117,37 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            if (proxyEnabled && string.IsNullOrWhiteSpace(proxyServer))
+            {
+                MessageBox.Show(
+                    "\u5df2\u542f\u7528\u81ea\u5b9a\u4e49\u4ee3\u7406\uff0c\u8bf7\u8f93\u5165\u4ee3\u7406\u670d\u52a1\u5668\u5730\u5740\uff08\u4f8b\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080\uff09\u3002",
+                    Text,
+                    MessageBoxButtons.OK,
+                    MessageBoxIcon.Warning);
+                proxyServerTextBox.Focus();
+                return;
+            }
+
+            if (proxyEnabled && !string.IsNullOrEmpty(proxyServer))
+            {
+                if (!proxyServer.Contains("://"))
+                {
+                    proxyServer = "http://" + proxyServer;
+                }
+
+                Uri proxyUri;
+                if (!Uri.TryCreate(proxyServer, UriKind.Absolute, out proxyUri))
+                {
+                    MessageBox.Show(
+                        "\u4ee3\u7406\u5730\u5740\u683c\u5f0f\u65e0\u6548\uff0c\u8bf7\u8f93\u5165\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080\u3002",
+                        Text,
+                        MessageBoxButtons.OK,
+                        MessageBoxIcon.Warning);
+                    proxyServerTextBox.Focus();
+                    return;
+                }
+            }
+
             if (string.IsNullOrWhiteSpace(name))
             {
                 name = uri.Host + (uri.IsDefaultPort ? string.Empty : ":" + uri.Port);
@@ -100,6 +163,8 @@ namespace LocalWebTrayShell
                 : Result.Id;
             Result.Name = name;
             Result.Url = uri.AbsoluteUri;
+            Result.ProxyEnabled = proxyEnabled && !string.IsNullOrEmpty(proxyServer);
+            Result.ProxyServer = Result.ProxyEnabled ? proxyServer : string.Empty;
 
             DialogResult = DialogResult.OK;
             Close();

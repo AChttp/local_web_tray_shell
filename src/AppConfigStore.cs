@@ -352,11 +352,16 @@ namespace LocalWebTrayShell
                     : site.Name.Trim();
                 id = string.IsNullOrWhiteSpace(site.Id) ? NewId("site") : site.Id.Trim();
 
+                string proxyServer = string.IsNullOrWhiteSpace(site.ProxyServer) ? string.Empty : site.ProxyServer.Trim();
+                bool proxyEnabled = site.ProxyEnabled && !string.IsNullOrEmpty(proxyServer);
+
                 site = new SiteEntry
                 {
                     Id = id,
                     Name = name,
-                    Url = normalizedUrl
+                    Url = normalizedUrl,
+                    ProxyEnabled = proxyEnabled,
+                    ProxyServer = proxyServer
                 };
 
                 uniqueSites[normalizedUrl] = site;

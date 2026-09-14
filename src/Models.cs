@@ -31,6 +31,12 @@ namespace LocalWebTrayShell
 
         [DataMember(Name = "url")]
         public string Url { get; set; }
+
+        [DataMember(Name = "proxy_enabled")]
+        public bool ProxyEnabled { get; set; }
+
+        [DataMember(Name = "proxy_server")]
+        public string ProxyServer { get; set; }
     }
 
     [DataContract]

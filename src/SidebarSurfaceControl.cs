@@ -553,7 +553,10 @@ namespace LocalWebTrayShell
                     }
 
                     string statusDesc = health == SiteHealth.Up ? "服务正常" : health == SiteHealth.Down ? "服务不可达" : "状态检测中";
-                    surfaceToolTip.SetToolTip(this, (site != null ? site.Name : string.Empty) + " · " + statusDesc + "\r\n" + (site != null ? site.Url : string.Empty));
+                    string proxyDesc = (site != null && site.ProxyEnabled && !string.IsNullOrWhiteSpace(site.ProxyServer))
+                        ? " · 代理: " + site.ProxyServer.Trim()
+                        : string.Empty;
+                    surfaceToolTip.SetToolTip(this, (site != null ? site.Name : string.Empty) + " · " + statusDesc + proxyDesc + "\r\n" + (site != null ? site.Url : string.Empty));
                     return;
                 }
             }
@@ -1114,6 +1117,17 @@ namespace LocalWebTrayShell
             int siteContentRight = bounds.Right - ReorderColumnWidth - 4;
             Rectangle titleRect = new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, siteContentRight - bounds.X - 30), 22);
             Rectangle urlRect = new Rectangle(bounds.X + 26, bounds.Y + 35, Math.Max(1, siteContentRight - bounds.X - 30), 18);
+
+            bool hasProxy = site != null && site.ProxyEnabled && !string.IsNullOrWhiteSpace(site.ProxyServer);
+            if (hasProxy)
+            {
+                int tagWidth = 32;
+                int tagHeight = 16;
+                Rectangle tagRect = new Rectangle(siteContentRight - tagWidth - 2, bounds.Y + 11, tagWidth, tagHeight);
+                DrawRoundedFill(graphics, tagRect, Color.FromArgb(238, 242, 255), Color.FromArgb(199, 210, 254), 3);
+                TextRenderer.DrawText(graphics, "代理", itemMetaFont, tagRect, Color.FromArgb(67, 56, 202), TextFlags(ContentAlignment.MiddleCenter));
+                titleRect = new Rectangle(bounds.X + 26, bounds.Y + 9, Math.Max(1, tagRect.Left - bounds.X - 28), 22);
+            }
 
             TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, titleRect, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
             TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Url ?? string.Empty, itemMetaFont, urlRect, UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));

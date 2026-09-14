@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace LocalWebTrayShell
@@ -100,6 +101,7 @@ namespace LocalWebTrayShell
         private readonly CommandManager commandManager;
         private readonly List<SiteEntry> sites;
         private readonly List<CommandEntry> commands;
+        private readonly Dictionary<string, Task<CoreWebView2Environment>> webViewEnvironments;
         private CoreWebView2Environment webViewEnvironment;
         private WorkspaceMode workspaceMode;
         private SiteEntry currentSite;
@@ -160,6 +162,7 @@ namespace LocalWebTrayShell
             siteHealth = new Dictionary<string, SiteHealth>(StringComparer.OrdinalIgnoreCase);
             pendingRuntimeRefreshCommandIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             pendingLogRefreshCommandIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            webViewEnvironments = new Dictionary<string, Task<CoreWebView2Environment>>(StringComparer.OrdinalIgnoreCase);
             siteViews = new Dictionary<string, SiteViewState>(StringComparer.OrdinalIgnoreCase);
             sites = new List<SiteEntry>(config.Sites ?? new SiteEntry[0]);
             commands = new List<CommandEntry>(config.Commands ?? new CommandEntry[0]);
@@ -626,9 +629,7 @@ namespace LocalWebTrayShell
             try
             {
                 AppLogger.Info("startup", "\u5f00\u59cb\u521d\u59cb\u5316 WebView2 \u8fd0\u884c\u73af\u5883");
-                webViewEnvironment = await CoreWebView2Environment.CreateAsync(
-                    null,
-                    AppPaths.WebViewUserDataDirectory);
+                webViewEnvironment = await GetOrCreateEnvironmentAsync(string.Empty);
 
                 AppLogger.Info("startup", "WebView2 \u5c31\u7eea\uff0c\u7ad9\u70b9 " + sites.Count + " \u4e2a\uff0c\u547d\u4ee4 " + commands.Count + " \u4e2a\uff0c\u81ea\u542f\u547d\u4ee4 " + CountEnabledOnStart());
                 SetTransientStatus("\u5de5\u4f5c\u53f0\u5df2\u5c31\u7eea\u3002");
@@ -1162,7 +1163,13 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            string proxyKey = GetSiteProxyKey(site);
             state = GetOrCreateSiteView(site);
+
+            if (state.IsInitialized && !string.Equals(state.ProxyKey, proxyKey, StringComparison.OrdinalIgnoreCase))
+            {
+                ResetSiteWebView(state, proxyKey);
+            }
 
             foreach (Control control in webViewHost.Controls)
             {
@@ -1207,11 +1214,14 @@ namespace LocalWebTrayShell
 
             try
             {
-                await state.WebView.EnsureCoreWebView2Async(webViewEnvironment);
+                SetTransientStatus("\u6b63\u5728\u521d\u59cb\u5316 " + site.Name + " \u7f51\u9875\u73af\u5883...");
+                CoreWebView2Environment env = await GetOrCreateEnvironmentAsync(proxyKey);
+                await state.WebView.EnsureCoreWebView2Async(env);
                 state.WebView.CoreWebView2.Settings.AreDefaultContextMenusEnabled = true;
                 state.WebView.CoreWebView2.Settings.AreDevToolsEnabled = true;
                 state.WebView.CoreWebView2.NewWindowRequested += OnNewWindowRequested;
                 state.IsInitialized = true;
+                state.ProxyKey = proxyKey;
                 state.LastNavigatedUrl = site.Url;
                 state.WebView.CoreWebView2.Navigate(site.Url);
                 SetWebState("\u6b63\u5728\u52a0\u8f7d " + site.Name, site.Url, false);
@@ -1243,6 +1253,7 @@ namespace LocalWebTrayShell
 
             state = new SiteViewState();
             state.Site = site;
+            state.ProxyKey = GetSiteProxyKey(site);
             state.NavigationHistory = new List<string>();
             state.WebView = new WebView2();
             state.WebView.Dock = DockStyle.Fill;
@@ -1255,6 +1266,100 @@ namespace LocalWebTrayShell
             webViewHost.Controls.Add(state.WebView);
             siteViews[site.Id] = state;
             return state;
+        }
+
+        private void ResetSiteWebView(SiteViewState state, string newProxyKey)
+        {
+            if (state.WebView != null)
+            {
+                webViewHost.Controls.Remove(state.WebView);
+                try
+                {
+                    state.WebView.Dispose();
+                }
+                catch
+                {
+                }
+            }
+
+            state.WebView = new WebView2();
+            state.WebView.Dock = DockStyle.Fill;
+            state.WebView.Visible = false;
+            state.WebView.Margin = new Padding(0);
+            state.WebView.Tag = state;
+            state.WebView.NavigationStarting += OnNavigationStarting;
+            state.WebView.NavigationCompleted += OnNavigationCompleted;
+            webViewHost.Controls.Add(state.WebView);
+
+            state.IsInitialized = false;
+            state.InitializationStarted = false;
+            state.ProxyKey = newProxyKey;
+        }
+
+        private string GetSiteProxyKey(SiteEntry site)
+        {
+            if (site == null || !site.ProxyEnabled || string.IsNullOrWhiteSpace(site.ProxyServer))
+            {
+                return string.Empty;
+            }
+
+            return site.ProxyServer.Trim();
+        }
+
+        private static string ComputeSimpleHash(string input)
+        {
+            using (System.Security.Cryptography.MD5 md5 = System.Security.Cryptography.MD5.Create())
+            {
+                byte[] bytes = System.Text.Encoding.UTF8.GetBytes(input.ToLowerInvariant());
+                byte[] hash = md5.ComputeHash(bytes);
+                StringBuilder sb = new StringBuilder("p_");
+                for (int i = 0; i < Math.Min(hash.Length, 8); i++)
+                {
+                    sb.Append(hash[i].ToString("x2"));
+                }
+                return sb.ToString();
+            }
+        }
+
+        private Task<CoreWebView2Environment> GetOrCreateEnvironmentAsync(string proxyKey)
+        {
+            lock (webViewEnvironments)
+            {
+                Task<CoreWebView2Environment> task;
+                if (webViewEnvironments.TryGetValue(proxyKey, out task))
+                {
+                    return task;
+                }
+
+                task = CreateEnvironmentInternalAsync(proxyKey);
+                webViewEnvironments[proxyKey] = task;
+                return task;
+            }
+        }
+
+        private async Task<CoreWebView2Environment> CreateEnvironmentInternalAsync(string proxyKey)
+        {
+            string userDataDir;
+            CoreWebView2EnvironmentOptions options = null;
+
+            if (string.IsNullOrEmpty(proxyKey))
+            {
+                userDataDir = AppPaths.WebViewUserDataDirectory;
+            }
+            else
+            {
+                string hash = ComputeSimpleHash(proxyKey);
+                userDataDir = System.IO.Path.Combine(AppPaths.WebViewUserDataDirectory, "proxies", hash);
+                options = new CoreWebView2EnvironmentOptions();
+                options.AdditionalBrowserArguments = "--proxy-server=" + proxyKey;
+            }
+
+            AppLogger.Info("web", string.IsNullOrEmpty(proxyKey)
+                ? "初始化直连 WebView2 环境: " + userDataDir
+                : "初始化代理 WebView2 环境 [" + proxyKey + "]: " + userDataDir);
+
+            CoreWebView2Environment env = await CoreWebView2Environment.CreateAsync(null, userDataDir, options);
+            return env;
         }
 
         private void OnNavigationStarting(object sender, CoreWebView2NavigationStartingEventArgs e)
@@ -1614,6 +1719,7 @@ namespace LocalWebTrayShell
                 PersistConfig();
                 RefreshSiteList();
                 SelectSite(selectedSite);
+                ProbeSingleSite(selectedSite);
             }
         }
 
@@ -3698,7 +3804,10 @@ namespace LocalWebTrayShell
 
             System.Threading.ThreadPool.QueueUserWorkItem(delegate
             {
-                SiteHealth health = ProbeUrl(site.Url);
+                string proxyServer = (site.ProxyEnabled && !string.IsNullOrWhiteSpace(site.ProxyServer))
+                    ? site.ProxyServer.Trim()
+                    : null;
+                SiteHealth health = ProbeUrl(site.Url, proxyServer);
                 SiteHealth previous;
 
                 lock (siteHealthSync)
@@ -3723,17 +3832,30 @@ namespace LocalWebTrayShell
             });
         }
 
-        // Lightweight HTTP probe using WebRequest (available via System.dll), so no extra
-        // assembly reference is needed. Treat any HTTP response (even non-2xx) as "up" --
-        // the server is listening. Connection refused / timeout / DNS => "down".
-        private static SiteHealth ProbeUrl(string url)
+        // Lightweight HTTP probe using WebRequest / SOCKS5 socket. Treat any HTTP response (even non-2xx)
+        // as "up" -- the server is listening. Connection refused / timeout / DNS => "down".
+        private static SiteHealth ProbeUrl(string url, string proxyServer)
         {
+            if (!string.IsNullOrEmpty(proxyServer) &&
+                proxyServer.StartsWith("socks", StringComparison.OrdinalIgnoreCase))
+            {
+                return ProbeSocks5(proxyServer, url, 3000) ? SiteHealth.Up : SiteHealth.Down;
+            }
+
             try
             {
                 System.Net.WebRequest request = System.Net.WebRequest.Create(url);
                 request.Method = "HEAD";
                 request.Timeout = 3000;
-                request.Proxy = null;
+
+                if (!string.IsNullOrEmpty(proxyServer))
+                {
+                    request.Proxy = new System.Net.WebProxy(proxyServer);
+                }
+                else
+                {
+                    request.Proxy = null;
+                }
 
                 using (System.Net.WebResponse response = request.GetResponse())
                 {
@@ -3755,6 +3877,64 @@ namespace LocalWebTrayShell
             {
                 return SiteHealth.Down;
             }
+        }
+
+        private static bool ProbeSocks5(string proxyServer, string targetUrl, int timeoutMs)
+        {
+            try
+            {
+                Uri proxyUri = new Uri(proxyServer);
+                Uri targetUri = new Uri(targetUrl);
+                string host = targetUri.DnsSafeHost;
+                int port = targetUri.Port > 0 ? targetUri.Port : (string.Equals(targetUri.Scheme, "https", StringComparison.OrdinalIgnoreCase) ? 443 : 80);
+
+                using (System.Net.Sockets.TcpClient client = new System.Net.Sockets.TcpClient())
+                {
+                    IAsyncResult ar = client.BeginConnect(proxyUri.DnsSafeHost, proxyUri.Port, null, null);
+                    if (!ar.AsyncWaitHandle.WaitOne(timeoutMs))
+                    {
+                        return false;
+                    }
+                    client.EndConnect(ar);
+                    client.ReceiveTimeout = timeoutMs;
+                    client.SendTimeout = timeoutMs;
+
+                    using (System.Net.Sockets.NetworkStream stream = client.GetStream())
+                    {
+                        stream.Write(new byte[] { 0x05, 0x01, 0x00 }, 0, 3);
+                        byte[] authResp = new byte[2];
+                        int read = stream.Read(authResp, 0, 2);
+                        if (read < 2 || authResp[0] != 0x05 || authResp[1] != 0x00)
+                        {
+                            return false;
+                        }
+
+                        byte[] domainBytes = System.Text.Encoding.ASCII.GetBytes(host);
+                        byte[] req = new byte[7 + domainBytes.Length];
+                        req[0] = 0x05;
+                        req[1] = 0x01;
+                        req[2] = 0x00;
+                        req[3] = 0x03;
+                        req[4] = (byte)domainBytes.Length;
+                        Array.Copy(domainBytes, 0, req, 5, domainBytes.Length);
+                        req[5 + domainBytes.Length] = (byte)((port >> 8) & 0xFF);
+                        req[6 + domainBytes.Length] = (byte)(port & 0xFF);
+
+                        stream.Write(req, 0, req.Length);
+
+                        byte[] resp = new byte[4];
+                        read = stream.Read(resp, 0, 4);
+                        if (read >= 2 && resp[0] == 0x05 && resp[1] == 0x00)
+                        {
+                            return true;
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+            return false;
         }
 
         private void ExitApplication()
@@ -3843,7 +4023,9 @@ namespace LocalWebTrayShell
             {
                 Id = site.Id,
                 Name = site.Name,
-                Url = site.Url
+                Url = site.Url,
+                ProxyEnabled = site.ProxyEnabled,
+                ProxyServer = site.ProxyServer
             };
         }
 
@@ -3851,6 +4033,8 @@ namespace LocalWebTrayShell
         {
             target.Name = source.Name;
             target.Url = source.Url;
+            target.ProxyEnabled = source.ProxyEnabled;
+            target.ProxyServer = source.ProxyServer;
         }
 
         private CommandEntry CloneCommand(CommandEntry command)
@@ -4011,6 +4195,8 @@ namespace LocalWebTrayShell
         private sealed class SiteViewState
         {
             public SiteEntry Site { get; set; }
+
+            public string ProxyKey { get; set; }
 
             public WebView2 WebView { get; set; }
 
