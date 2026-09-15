@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.7 - 2026-09-15
+
+UI overhaul release: full high-DPI support, window chrome fixes, a denser sidebar, a smarter logs view, and a batch of interaction fixes.
+
+### Added
+
+- High-DPI support across the whole UI: every owner-drawn metric and all fonts scale by the monitor DPI, with live re-layout and font rebuild when the window moves between monitors (WM_DPICHANGED). Text no longer overflows fixed-size boxes on 125%/150% displays.
+- Layout persistence: window placement and maximized state, sidebar width and collapsed state, workspace mode (web/split/logs), split ratio, and the selected site/command are restored on the next start.
+- Title bar overflow menu with hotkey settings, startup toggle, config import/export, log folder, and an in-window Exit entry.
+- Keyboard shortcuts: Ctrl+1/2/3 (workspace modes), Ctrl+B (sidebar), F5 (reload), Alt+Left/Right (back/forward), Ctrl+L (focus address bar).
+- Sidebar: thin drawn scrollbars with drag and track paging, smooth precision-touchpad scrolling, an explicit keyboard focus model (Tab switches lists, arrows move, Enter activates, Delete removes, with a visible focus ring), full command text in tooltips, button-styled empty states, and text health badges on site cards (readable for color-blind users).
+- Logs view: stderr lines colored red, filter box, word-wrap toggle, copy-selection-or-all, and a clear confirmation.
+- Dialogs: inline validation errors instead of stacked message boxes, height capped to the work area with scrolling (the command editor fits 768p screens now), a Clear button for the captured hotkey, and invalid environment-variable lines are blocked with feedback instead of being silently dropped.
+- Splitters show grip dots and reset to defaults on double-click; section headers show item counts.
+
+### Changed
+
+- Sidebar density: the brand area (title + summary line) is gone; the mode switch and stop-all share one compact row; cards, gaps, and buttons are ~25-50% smaller so roughly twice as many entries fit on screen.
+- Popup windows (target=_blank) now open in the system browser instead of hijacking the current embedded page.
+- Right-clicking a site selects it without forcing a workspace-mode switch or a navigation.
+- Tray menu deduplicated and extended with a "start auto-start commands" entry.
+- SOCKS5 site health probes now issue a full HTTP HEAD request after CONNECT instead of treating the handshake alone as "up".
+
+### Fixed
+
+- Maximize no longer covers the taskbar (WM_GETMINMAXINFO), and resize edges are disabled while maximized; fixed the follow-up bug where a swapped MINMAXINFO field order collapsed the maximized window to 0x0.
+- List hit-testing is keyed by entry ID and cleared on data changes, so clicks after list mutations can no longer select or delete the wrong entry; hover state no longer drifts after wheel scrolling.
+- Importing a config no longer leaves the selection pointing at removed entries, and cached WebViews of removed sites are disposed.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.7-win-x64.zip`
+
 ## v1.0.6 - 2026-09-02
 
 Stability release focused on two freeze fixes and a new session logging system.
