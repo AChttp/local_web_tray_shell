@@ -456,7 +456,7 @@ namespace LocalWebTrayShell
                 {
                     if (!string.IsNullOrEmpty(e.Data))
                     {
-                        AppendLog(commandId, e.Data);
+                        AppendLog(commandId, e.Data, true);
                     }
                 };
                 process.Exited += delegate
@@ -818,6 +818,11 @@ namespace LocalWebTrayShell
 
         private void AppendLog(string commandId, string message)
         {
+            AppendLog(commandId, message, false);
+        }
+
+        private void AppendLog(string commandId, string message, bool isError)
+        {
             lock (syncRoot)
             {
                 CommandRuntimeState runtime;
@@ -827,13 +832,18 @@ namespace LocalWebTrayShell
                     return;
                 }
 
-                AddLogLocked(runtime, message);
+                AddLogLocked(runtime, message, isError);
             }
 
             RaiseRuntimeChanged(commandId, true);
         }
 
         private void AddLogLocked(CommandRuntimeState runtime, string message)
+        {
+            AddLogLocked(runtime, message, false);
+        }
+
+        private void AddLogLocked(CommandRuntimeState runtime, string message, bool isError)
         {
             if (runtime.Logs == null)
             {
@@ -847,13 +857,15 @@ namespace LocalWebTrayShell
 
             runtime.Logs.Enqueue(new CommandLogLine(
                 runtime.NextLogSequence,
-                "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + message));
+                "[" + DateTime.Now.ToString("HH:mm:ss") + "] " + message,
+                isError));
             runtime.NextLogSequence += 1;
         }
 
         private CommandLogSnapshot CreateLogSnapshotLocked(string commandId, CommandRuntimeState runtime)
         {
             string[] lines;
+            bool[] errorFlags;
             int index = 0;
             int firstSequence = runtime.NextLogSequence;
 
@@ -863,12 +875,14 @@ namespace LocalWebTrayShell
                 {
                     CommandId = commandId,
                     Lines = new string[0],
+                    ErrorFlags = new bool[0],
                     FirstSequence = firstSequence,
                     NextSequence = runtime.NextLogSequence
                 };
             }
 
             lines = new string[runtime.Logs.Count];
+            errorFlags = new bool[runtime.Logs.Count];
 
             foreach (CommandLogLine line in runtime.Logs)
             {
@@ -878,6 +892,7 @@ namespace LocalWebTrayShell
                 }
 
                 lines[index] = line.Text;
+                errorFlags[index] = line.IsError;
                 index += 1;
             }
 
@@ -885,6 +900,7 @@ namespace LocalWebTrayShell
             {
                 CommandId = commandId,
                 Lines = lines,
+                ErrorFlags = errorFlags,
                 FirstSequence = firstSequence,
                 NextSequence = runtime.NextLogSequence
             };
@@ -1045,15 +1061,18 @@ namespace LocalWebTrayShell
 
         private sealed class CommandLogLine
         {
-            public CommandLogLine(int sequence, string text)
+            public CommandLogLine(int sequence, string text, bool isError)
             {
                 Sequence = sequence;
                 Text = text;
+                IsError = isError;
             }
 
             public int Sequence { get; private set; }
 
             public string Text { get; private set; }
+
+            public bool IsError { get; private set; }
         }
 
         private sealed class CommandRuntimeState

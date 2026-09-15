@@ -218,11 +218,33 @@ namespace LocalWebTrayShell
                 Sites = SanitizeSites(config.Sites),
                 Commands = SanitizeCommands(config.Commands),
                 GlobalHotkey = SanitizeHotkey(config.GlobalHotkey),
-                CommandSectionRatio = SanitizeRatio(config.CommandSectionRatio)
+                CommandSectionRatio = SanitizeRatio(config.CommandSectionRatio),
+                WindowLeft = config.WindowLeft,
+                WindowTop = config.WindowTop,
+                WindowWidth = config.WindowWidth,
+                WindowHeight = config.WindowHeight,
+                WindowMaximized = config.WindowMaximized,
+                SidebarWidth = config.SidebarWidth,
+                SidebarHidden = config.SidebarHidden,
+                WorkspaceMode = WorkspaceModeCatalog.ToString(WorkspaceModeCatalog.Parse(config.WorkspaceMode)),
+                WorkspaceSplitRatio = SanitizeSplitRatio(config.WorkspaceSplitRatio),
+                SelectedSiteId = config.SelectedSiteId,
+                SelectedCommandId = config.SelectedCommandId
             };
         }
 
         public const double DefaultCommandSectionRatio = 0.42;
+        public const double DefaultWorkspaceSplitRatio = 0.55;
+
+        private static double SanitizeSplitRatio(double ratio)
+        {
+            if (ratio < 0.20 || ratio > 0.80 || double.IsNaN(ratio) || double.IsInfinity(ratio))
+            {
+                return DefaultWorkspaceSplitRatio;
+            }
+
+            return ratio;
+        }
 
         private static double SanitizeRatio(double ratio)
         {

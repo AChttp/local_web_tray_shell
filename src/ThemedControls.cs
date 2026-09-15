@@ -47,6 +47,8 @@ namespace LocalWebTrayShell
 
         public Color HoverForeColor { get; set; }
 
+        public Color PressedForeColor { get; set; }
+
         public Color DisabledForeColor { get; set; }
 
         public Color BorderColor { get; set; }
@@ -54,6 +56,8 @@ namespace LocalWebTrayShell
         public Color HoverBorderColor { get; set; }
 
         public Color DisabledBorderColor { get; set; }
+
+        public float BorderWidth { get; set; }
 
         protected override void OnMouseEnter(EventArgs e)
         {
@@ -115,7 +119,7 @@ namespace LocalWebTrayShell
 
             using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, CornerRadius))
             using (SolidBrush fillBrush = new SolidBrush(fill))
-            using (Pen borderPen = new Pen(border, 1f))
+            using (Pen borderPen = new Pen(border, BorderWidth <= 0f ? 1f : BorderWidth))
             {
                 pevent.Graphics.FillPath(fillBrush, path);
                 if (border != Color.Transparent)
@@ -124,7 +128,11 @@ namespace LocalWebTrayShell
                 }
             }
 
-            Color textColor = !Enabled ? DisabledForeColor : (hover && HoverForeColor != Color.Empty ? HoverForeColor : NormalForeColor);
+            Color textColor = !Enabled
+                ? DisabledForeColor
+                : (pressed && PressedForeColor != Color.Empty
+                    ? PressedForeColor
+                    : (hover && HoverForeColor != Color.Empty ? HoverForeColor : NormalForeColor));
             TextRenderer.DrawText(
                 pevent.Graphics,
                 Text,
@@ -135,6 +143,32 @@ namespace LocalWebTrayShell
                 TextFormatFlags.VerticalCenter |
                 TextFormatFlags.EndEllipsis |
                 TextFormatFlags.NoPrefix);
+
+            if (Focused && Enabled)
+            {
+                Rectangle focusRect = new Rectangle(3, 3, Math.Max(1, Width - 7), Math.Max(1, Height - 7));
+
+                using (Pen pen = new Pen(UiTheme.FocusRing, 1.5f))
+                {
+                    pen.DashStyle = DashStyle.Dash;
+                    using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(focusRect, Math.Max(2, CornerRadius - 2)))
+                    {
+                        pevent.Graphics.DrawPath(pen, path);
+                    }
+                }
+            }
+        }
+
+        protected override void OnGotFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnGotFocus(e);
+        }
+
+        protected override void OnLostFocus(EventArgs e)
+        {
+            Invalidate();
+            base.OnLostFocus(e);
         }
 
         private Color GetFillColor()
@@ -384,6 +418,25 @@ namespace LocalWebTrayShell
             {
                 e.Graphics.FillRectangle(brush, lineX, 0, lineWidth, Height);
             }
+
+            // Grip dots: make the drag affordance visible without requiring hover.
+            if (!collapsed)
+            {
+                Color gripColor = active || hover ? UiTheme.Primary : UiTheme.TextMuted;
+                int dot = Math.Max(2, UiTheme.Scale(3));
+                int gap = Math.Max(5, UiTheme.Scale(8));
+                int cx = lineX + (lineWidth / 2);
+                int cy = Height / 2;
+                e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+                using (SolidBrush brush = new SolidBrush(gripColor))
+                {
+                    for (int i = -1; i <= 1; i++)
+                    {
+                        e.Graphics.FillEllipse(brush, cx - (dot / 2), cy + (i * gap) - (dot / 2), dot, dot);
+                    }
+                }
+            }
         }
     }
 
@@ -444,6 +497,22 @@ namespace LocalWebTrayShell
             using (SolidBrush brush = new SolidBrush(lineColor))
             {
                 e.Graphics.FillRectangle(brush, 0, lineY, Width, lineHeight);
+            }
+
+            // Grip dots: hint that this strip can be dragged (double-click resets).
+            Color dotColor = active || hover ? UiTheme.Primary : UiTheme.TextMuted;
+            int dotSize = Math.Max(2, UiTheme.Scale(3));
+            int spacing = Math.Max(5, UiTheme.Scale(8));
+            int centerX = Width / 2;
+            int centerY = lineY + (lineHeight / 2);
+            e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
+
+            using (SolidBrush brush = new SolidBrush(dotColor))
+            {
+                for (int i = -1; i <= 1; i++)
+                {
+                    e.Graphics.FillEllipse(brush, centerX + (i * spacing) - (dotSize / 2), centerY - (dotSize / 2), dotSize, dotSize);
+                }
             }
         }
     }

@@ -14,43 +14,45 @@ namespace LocalWebTrayShell
         private readonly TextBox proxyServerTextBox;
         private readonly ThemedButton saveButton;
         private readonly ThemedButton cancelButton;
+        private readonly Label errorLabel;
 
         public SiteDialog(SiteEntry initial)
         {
-            string title = initial == null ? "\u65b0\u589e\u7ad9\u70b9" : "\u7f16\u8f91\u7ad9\u70b9";
-            DialogUi.StyleForm(this, title, new Size(540, 440));
+            string title = initial == null ? "新增站点" : "编辑站点";
+            DialogUi.StyleForm(this, title, new Size(540, 392));
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
             layout.RowCount = 9;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f)); // 0: header
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f)); // 1: name label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // 2: name input
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f)); // 3: url label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // 4: url input
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f)); // 5: proxy check
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f)); // 6: proxy server input
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f)); // 7: proxy hint
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f)); // 8: footer
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(58))); // 0: header
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22))); // 1: name label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(44))); // 2: name input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22))); // 3: url label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(44))); // 4: url input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(32))); // 5: proxy check
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(44))); // 6: proxy server input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(24))); // 7: proxy hint
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(56))); // 8: footer
 
             nameTextBox = DialogUi.CreateTextBox(false);
             urlTextBox = DialogUi.CreateTextBox(false);
-            proxyCheckBox = DialogUi.CreateCheckBox("\u4f7f\u7528\u81ea\u5b9a\u4e49\u4ee3\u7406\uff08\u672a\u52fe\u9009\u65f6\u4e3a\u76f4\u8fde\uff09");
+            proxyCheckBox = DialogUi.CreateCheckBox("使用自定义代理（未勾选时为直连）");
             proxyCheckBox.Dock = DockStyle.Fill;
 
             proxyServerTextBox = DialogUi.CreateTextBox(false);
 
-            saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
+            saveButton = DialogUi.CreatePrimaryButton("保存", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
+            errorLabel = DialogUi.CreateErrorLabel();
 
-            layout.Controls.Add(DialogUi.CreateModalHeader(title, "\u914d\u7f6e Web \u670d\u52a1\u7684\u8bbf\u95ee\u5730\u5740\u53ca\u72ec\u7acb\u7f51\u7edc\u4ee3\u7406"), 0, 0);
-            layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 1);
+            layout.Controls.Add(DialogUi.CreateModalHeader(title, "配置 Web 服务的访问地址及独立网络代理"), 0, 0);
+            layout.Controls.Add(DialogUi.CreateLabel("名称"), 0, 1);
             layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 2);
             layout.Controls.Add(DialogUi.CreateLabel("URL"), 0, 3);
             layout.Controls.Add(DialogUi.CreateInputFrame(urlTextBox, false), 0, 4);
             layout.Controls.Add(proxyCheckBox, 0, 5);
             layout.Controls.Add(DialogUi.CreateInputFrame(proxyServerTextBox, false), 0, 6);
-            layout.Controls.Add(DialogUi.CreateSmallLabel("\u652f\u6301 HTTP\u3001HTTPS \u4e0e SOCKS5\uff0c\u4f8b\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080"), 0, 7);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 8);
+            layout.Controls.Add(DialogUi.CreateSmallLabel("支持 HTTP、HTTPS 与 SOCKS5，例如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"), 0, 7);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton, errorLabel), 0, 8);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -88,7 +90,22 @@ namespace LocalWebTrayShell
             }
         }
 
+        private static int S(int value)
+        {
+            return UiTheme.Scale(value);
+        }
+
         public SiteEntry Result { get; private set; }
+
+        private void ShowError(string message, Control focusControl)
+        {
+            errorLabel.Text = message ?? string.Empty;
+
+            if (focusControl != null)
+            {
+                focusControl.Focus();
+            }
+        }
 
         private void OnSaveClicked(object sender, EventArgs e)
         {
@@ -98,13 +115,11 @@ namespace LocalWebTrayShell
             string proxyServer = proxyServerTextBox.Text == null ? string.Empty : proxyServerTextBox.Text.Trim();
             bool proxyEnabled = proxyCheckBox.Checked;
 
+            errorLabel.Text = string.Empty;
+
             if (string.IsNullOrWhiteSpace(url))
             {
-                MessageBox.Show(
-                    "\u8bf7\u8f93\u5165\u7ad9\u70b9 URL\u3002",
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                ShowError("请输入站点 URL。", urlTextBox);
                 return;
             }
 
@@ -112,22 +127,13 @@ namespace LocalWebTrayShell
                 (!string.Equals(uri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
                  !string.Equals(uri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
             {
-                MessageBox.Show(
-                    "\u8bf7\u8f93\u5165\u6709\u6548\u7684 http \u6216 https URL\u3002",
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                ShowError("请输入有效的 http 或 https URL。", urlTextBox);
                 return;
             }
 
             if (proxyEnabled && string.IsNullOrWhiteSpace(proxyServer))
             {
-                MessageBox.Show(
-                    "\u5df2\u542f\u7528\u81ea\u5b9a\u4e49\u4ee3\u7406\uff0c\u8bf7\u8f93\u5165\u4ee3\u7406\u670d\u52a1\u5668\u5730\u5740\uff08\u4f8b\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080\uff09\u3002",
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
-                proxyServerTextBox.Focus();
+                ShowError("已启用自定义代理，请输入代理服务器地址（例如 http://127.0.0.1:7890）。", proxyServerTextBox);
                 return;
             }
 
@@ -141,12 +147,7 @@ namespace LocalWebTrayShell
                 Uri proxyUri;
                 if (!Uri.TryCreate(proxyServer, UriKind.Absolute, out proxyUri))
                 {
-                    MessageBox.Show(
-                        "\u4ee3\u7406\u5730\u5740\u683c\u5f0f\u65e0\u6548\uff0c\u8bf7\u8f93\u5165\u5982 http://127.0.0.1:7890 \u6216 socks5://127.0.0.1:1080\u3002",
-                        Text,
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
-                    proxyServerTextBox.Focus();
+                    ShowError("代理地址格式无效，请输入如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080。", proxyServerTextBox);
                     return;
                 }
             }
@@ -180,6 +181,8 @@ namespace LocalWebTrayShell
         private readonly Label comboLabel;
         private readonly ThemedButton saveButton;
         private readonly ThemedButton cancelButton;
+        private readonly ThemedButton clearButton;
+        private readonly Label errorLabel;
 
         private int capturedModifiers;
         private int capturedKey;
@@ -187,18 +190,18 @@ namespace LocalWebTrayShell
 
         public HotkeyDialog(HotkeyConfig initial)
         {
-            DialogUi.StyleForm(this, "\u5feb\u6377\u952e\u8bbe\u7f6e", new Size(460, 320));
+            DialogUi.StyleForm(this, "快捷键设置", new Size(460, 300));
             KeyPreview = true;
             KeyDown += OnCaptureKeyDown;
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
             layout.RowCount = 6;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 64f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 24f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(58)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(64)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(24)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(32)));
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(56)));
 
             comboLabel = new Label();
             comboLabel.Dock = DockStyle.Fill;
@@ -212,22 +215,50 @@ namespace LocalWebTrayShell
             comboCard.BackColor = UiTheme.CardBackground;
             comboCard.BorderColor = UiTheme.Border;
             comboCard.BorderWidth = 1.5f;
-            comboCard.CornerRadius = 8;
-            comboCard.Margin = new Padding(0, 0, 0, 6);
+            comboCard.CornerRadius = S(8);
+            comboCard.Margin = new Padding(0, 0, 0, S(6));
             comboCard.Controls.Add(comboLabel);
 
-            enableCheckBox = DialogUi.CreateCheckBox("\u542f\u7528\u5168\u5c40\u5feb\u6377\u952e\uff08\u6258\u76d8\u540e\u53f0\u4e5f\u751f\u6548\uff09");
+            clearButton = new ThemedButton();
+            clearButton.Text = "清除";
+            clearButton.Size = new Size(S(64), S(34));
+            clearButton.CornerRadius = S(7);
+            clearButton.Margin = new Padding(S(8), 0, 0, S(6));
+            UiTheme.StyleSecondaryButton(clearButton);
+            clearButton.Click += delegate
+            {
+                capturedModifiers = 0;
+                capturedKey = 0;
+                hasCapture = false;
+                errorLabel.Text = string.Empty;
+                UpdateComboLabel();
+            };
+
+            TableLayoutPanel captureRow = new TableLayoutPanel();
+            captureRow.Dock = DockStyle.Fill;
+            captureRow.Margin = new Padding(0);
+            captureRow.Padding = new Padding(0);
+            captureRow.BackColor = UiTheme.WindowBackground;
+            captureRow.ColumnCount = 2;
+            captureRow.RowCount = 1;
+            captureRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+            captureRow.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(76)));
+            captureRow.Controls.Add(comboCard, 0, 0);
+            captureRow.Controls.Add(clearButton, 1, 0);
+
+            enableCheckBox = DialogUi.CreateCheckBox("启用全局快捷键（托盘后台也生效）");
             enableCheckBox.Dock = DockStyle.Fill;
 
-            saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
+            saveButton = DialogUi.CreatePrimaryButton("保存", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
+            errorLabel = DialogUi.CreateErrorLabel();
 
-            layout.Controls.Add(DialogUi.CreateModalHeader("\u5feb\u6377\u952e\u8bbe\u7f6e", "\u8bbe\u7f6e\u547c\u51fa\u6216\u9690\u85cf\u4e3b\u7a97\u53e3\u7684\u5168\u5c40\u70ed\u952e"), 0, 0);
-            layout.Controls.Add(DialogUi.CreateLabel("\u8bf7\u76f4\u63a5\u6309\u4e0b\u7ec4\u5408\u952e\uff08\u5982 Ctrl + `\uff09"), 0, 1);
-            layout.Controls.Add(comboCard, 0, 2);
-            layout.Controls.Add(DialogUi.CreateSmallLabel("\u9700\u5305\u542b Ctrl \u6216 Alt \u4e4b\u4e00\uff1bWin \u952e\u6682\u4e0d\u652f\u6301"), 0, 3);
+            layout.Controls.Add(DialogUi.CreateModalHeader("快捷键设置", "设置呼出或隐藏主窗口的全局热键"), 0, 0);
+            layout.Controls.Add(DialogUi.CreateLabel("请直接按下组合键（如 Ctrl + `）"), 0, 1);
+            layout.Controls.Add(captureRow, 0, 2);
+            layout.Controls.Add(DialogUi.CreateSmallLabel("需包含 Ctrl 或 Alt 之一；Win 键暂不支持"), 0, 3);
             layout.Controls.Add(enableCheckBox, 0, 4);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 5);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton, errorLabel), 0, 5);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -246,6 +277,11 @@ namespace LocalWebTrayShell
             }
 
             UpdateComboLabel();
+        }
+
+        private static int S(int value)
+        {
+            return UiTheme.Scale(value);
         }
 
         public HotkeyConfig Result { get; private set; }
@@ -295,6 +331,7 @@ namespace LocalWebTrayShell
             capturedModifiers = modifiers;
             capturedKey = e.KeyValue;
             hasCapture = true;
+            errorLabel.Text = string.Empty;
             UpdateComboLabel();
         }
 
@@ -302,7 +339,7 @@ namespace LocalWebTrayShell
         {
             if (!hasCapture)
             {
-                comboLabel.Text = "\uff08\u8bf7\u6309\u4e0b\u7ec4\u5408\u952e\uff09";
+                comboLabel.Text = "（请按下组合键）";
                 comboLabel.ForeColor = UiTheme.TextMuted;
                 return;
             }
@@ -329,21 +366,13 @@ namespace LocalWebTrayShell
             {
                 if (!hasCapture)
                 {
-                    MessageBox.Show(
-                        "\u8bf7\u5148\u6309\u4e0b\u8981\u8bbe\u7f6e\u7684\u7ec4\u5408\u952e\u3002",
-                        Text,
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+                    errorLabel.Text = "请先按下要设置的组合键。";
                     return;
                 }
 
                 if (!IsCaptureValid())
                 {
-                    MessageBox.Show(
-                        "\u7ec4\u5408\u952e\u9700\u5305\u542b Ctrl \u6216 Alt\uff08Shift \u5355\u72ec\u65e0\u6548\uff09\u3002",
-                        Text,
-                        MessageBoxButtons.OK,
-                        MessageBoxIcon.Warning);
+                    errorLabel.Text = "组合键需包含 Ctrl 或 Alt（Shift 单独无效）。";
                     return;
                 }
 
@@ -385,6 +414,7 @@ namespace LocalWebTrayShell
         private readonly TextBox environmentTextBox;
         private readonly ThemedButton saveButton;
         private readonly ThemedButton cancelButton;
+        private readonly Label errorLabel;
 
         public CommandDialog(CommandEntry initial, bool commandReadOnly)
         {
@@ -392,24 +422,24 @@ namespace LocalWebTrayShell
                 ? AppConfigStore.CreateDefaultAutoRetry()
                 : initial.AutoRetry;
 
-            string title = initial == null ? "\u65b0\u589e\u547d\u4ee4" : "\u7f16\u8f91\u547d\u4ee4";
-            DialogUi.StyleForm(this, title, new Size(680, 840));
+            string title = initial == null ? "新增命令" : "编辑命令";
+            DialogUi.StyleForm(this, title, new Size(680, 748));
 
             TableLayoutPanel layout = DialogUi.CreateLayout();
             layout.RowCount = 13;
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 58f));   // 0  header
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 1  name label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 44f));   // 2  name input
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 3  command label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 116f));  // 4  command input (multiline)
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 12f));   // 5  spacer
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 68f));   // 6  options panel
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 7  working dir label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));   // 8  working dir input + browse
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));   // 9  environment label
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 96f));   // 10 environment input (multiline)
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, 146f));  // 11 retry panel
-            layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));   // 12 footer
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(58)));   // 0  header
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));   // 1  name label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(44)));   // 2  name input
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));   // 3  command label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(116)));  // 4  command input (multiline)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(12)));   // 5  spacer
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(68)));   // 6  options panel
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));   // 7  working dir label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(42)));   // 8  working dir input + browse
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));   // 9  environment label
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(96)));   // 10 environment input (multiline)
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(146)));  // 11 retry panel
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(56)));   // 12 footer
 
             nameTextBox = DialogUi.CreateTextBox(false);
             commandTextBox = DialogUi.CreateMonospaceTextBox(true);
@@ -417,13 +447,13 @@ namespace LocalWebTrayShell
             commandTextBox.ScrollBars = ScrollBars.Vertical;
 
             runModeComboBox = DialogUi.CreateComboBox();
-            runModeComboBox.Items.Add("\u76f4\u63a5");
+            runModeComboBox.Items.Add("直接");
             runModeComboBox.Items.Add("cmd");
             runModeComboBox.Items.Add("PowerShell");
 
-            enabledOnStartCheckBox = DialogUi.CreateCheckBox("Switch \u6253\u5f00\u65f6\u81ea\u52a8\u542f\u52a8");
+            enabledOnStartCheckBox = DialogUi.CreateCheckBox("Switch 打开时自动启动");
 
-            retryEnabledCheckBox = DialogUi.CreateCheckBox("\u547d\u4ee4\u5f02\u5e38\u9000\u51fa\u65f6\u81ea\u52a8\u91cd\u8bd5");
+            retryEnabledCheckBox = DialogUi.CreateCheckBox("命令异常退出时自动重试");
             retryEnabledCheckBox.CheckedChanged += OnRetryCheckedChanged;
 
             maxAttemptsUpDown = DialogUi.CreateNumeric(0, 1000);
@@ -433,9 +463,9 @@ namespace LocalWebTrayShell
 
             workingDirectoryTextBox = DialogUi.CreateTextBox(false);
             browseButton = new ThemedButton();
-            browseButton.Text = "\u6d4f\u89c8...";
-            browseButton.Size = new Size(84, 32);
-            browseButton.CornerRadius = 7;
+            browseButton.Text = "浏览...";
+            browseButton.Size = new Size(S(84), S(32));
+            browseButton.CornerRadius = S(7);
             UiTheme.StyleSecondaryButton(browseButton);
             browseButton.Click += OnBrowseWorkingDirectoryClicked;
 
@@ -443,21 +473,22 @@ namespace LocalWebTrayShell
             environmentTextBox.AcceptsReturn = true;
             environmentTextBox.ScrollBars = ScrollBars.Vertical;
 
-            saveButton = DialogUi.CreatePrimaryButton("\u4fdd\u5b58", OnSaveClicked);
+            saveButton = DialogUi.CreatePrimaryButton("保存", OnSaveClicked);
             cancelButton = DialogUi.CreateCancelButton();
+            errorLabel = DialogUi.CreateErrorLabel();
 
-            layout.Controls.Add(DialogUi.CreateModalHeader(title, "\u7ba1\u7406\u5e38\u9a7b\u540e\u53f0\u8fdb\u7a0b\u3001\u542f\u52a8\u53c2\u6570\u53ca\u5f02\u5e38\u81ea\u6108\u7b56\u7565"), 0, 0);
-            layout.Controls.Add(DialogUi.CreateLabel("\u540d\u79f0"), 0, 1);
+            layout.Controls.Add(DialogUi.CreateModalHeader(title, "管理常驻后台进程、启动参数及异常自愈策略"), 0, 0);
+            layout.Controls.Add(DialogUi.CreateLabel("名称"), 0, 1);
             layout.Controls.Add(DialogUi.CreateInputFrame(nameTextBox, false), 0, 2);
-            layout.Controls.Add(DialogUi.CreateLabel("\u547d\u4ee4"), 0, 3);
+            layout.Controls.Add(DialogUi.CreateLabel("命令"), 0, 3);
             layout.Controls.Add(DialogUi.CreateInputFrame(commandTextBox, true), 0, 4);
             layout.Controls.Add(CreateCommandOptionsPanel(), 0, 6);
-            layout.Controls.Add(DialogUi.CreateLabel("\u5de5\u4f5c\u76ee\u5f55"), 0, 7);
+            layout.Controls.Add(DialogUi.CreateLabel("工作目录"), 0, 7);
             layout.Controls.Add(CreateWorkingDirectoryPanel(), 0, 8);
-            layout.Controls.Add(DialogUi.CreateLabel("\u73af\u5883\u53d8\u91cf\uff08\u6bcf\u884c KEY=VALUE\uff09"), 0, 9);
+            layout.Controls.Add(DialogUi.CreateLabel("环境变量（每行 KEY=VALUE）"), 0, 9);
             layout.Controls.Add(DialogUi.CreateInputFrame(environmentTextBox, true), 0, 10);
             layout.Controls.Add(CreateRetryPanel(), 0, 11);
-            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton), 0, 12);
+            layout.Controls.Add(DialogUi.CreateFooter(saveButton, cancelButton, errorLabel), 0, 12);
 
             Controls.Add(layout);
             AcceptButton = saveButton;
@@ -516,6 +547,11 @@ namespace LocalWebTrayShell
             }
         }
 
+        private static int S(int value)
+        {
+            return UiTheme.Scale(value);
+        }
+
         private Control CreateWorkingDirectoryPanel()
         {
             TableLayoutPanel panel = new TableLayoutPanel();
@@ -526,7 +562,7 @@ namespace LocalWebTrayShell
             panel.ColumnCount = 2;
             panel.RowCount = 1;
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 92f));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(92)));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             Control frame = DialogUi.CreateInputFrame(workingDirectoryTextBox, false);
@@ -534,7 +570,7 @@ namespace LocalWebTrayShell
             frame.Margin = new Padding(0);
 
             browseButton.Dock = DockStyle.Fill;
-            browseButton.Margin = new Padding(8, 0, 0, 0);
+            browseButton.Margin = new Padding(S(8), 0, 0, 0);
 
             panel.Controls.Add(frame, 0, 0);
             panel.Controls.Add(browseButton, 1, 0);
@@ -545,7 +581,7 @@ namespace LocalWebTrayShell
         {
             using (FolderBrowserDialog dialog = new FolderBrowserDialog())
             {
-                dialog.Description = "\u9009\u62e9\u547d\u4ee4\u7684\u5de5\u4f5c\u76ee\u5f55";
+                dialog.Description = "选择命令的工作目录";
                 string current = workingDirectoryTextBox.Text;
 
                 if (!string.IsNullOrWhiteSpace(current) && Directory.Exists(current.Trim()))
@@ -607,12 +643,13 @@ namespace LocalWebTrayShell
             return builder.ToString();
         }
 
-        private static EnvironmentVariableEntry[] ParseEnvironmentVariables(string text)
+        private static EnvironmentVariableEntry[] ParseEnvironmentVariables(string text, out int invalidLineCount)
         {
             List<EnvironmentVariableEntry> results = new List<EnvironmentVariableEntry>();
             string[] lines = (text ?? string.Empty).Split(
                 new[] { "\r\n", "\n" },
                 StringSplitOptions.RemoveEmptyEntries);
+            invalidLineCount = 0;
 
             for (int index = 0; index < lines.Length; index++)
             {
@@ -627,6 +664,7 @@ namespace LocalWebTrayShell
 
                 if (separator <= 0)
                 {
+                    invalidLineCount += 1;
                     continue;
                 }
 
@@ -651,15 +689,15 @@ namespace LocalWebTrayShell
             panel.BackColor = UiTheme.WindowBackground;
             panel.ColumnCount = 2;
             panel.RowCount = 2;
-            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 220f));
+            panel.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(220)));
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             enabledOnStartCheckBox.Dock = DockStyle.Fill;
-            enabledOnStartCheckBox.Margin = new Padding(18, 6, 0, 0);
+            enabledOnStartCheckBox.Margin = new Padding(S(18), S(6), 0, 0);
 
-            panel.Controls.Add(DialogUi.CreateLabel("\u542f\u52a8\u65b9\u5f0f"), 0, 0);
+            panel.Controls.Add(DialogUi.CreateLabel("启动方式"), 0, 0);
             panel.Controls.Add(DialogUi.CreateComboFrame(runModeComboBox), 0, 1);
             panel.Controls.Add(enabledOnStartCheckBox, 1, 1);
             return panel;
@@ -669,12 +707,12 @@ namespace LocalWebTrayShell
         {
             RoundedPanel shell = new RoundedPanel();
             shell.Dock = DockStyle.Fill;
-            shell.Margin = new Padding(0, 0, 0, 10);
-            shell.Padding = new Padding(16, 12, 16, 12);
+            shell.Margin = new Padding(0, 0, 0, S(10));
+            shell.Padding = new Padding(S(16), S(12), S(16), S(12));
             shell.BackColor = UiTheme.CardBackground;
             shell.BorderColor = UiTheme.Border;
             shell.BorderWidth = 1f;
-            shell.CornerRadius = 8;
+            shell.CornerRadius = S(8);
 
             TableLayoutPanel panel = new TableLayoutPanel();
             panel.Dock = DockStyle.Fill;
@@ -687,21 +725,21 @@ namespace LocalWebTrayShell
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
             panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 25f));
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 32f));
-            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, 22f));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, S(32)));
+            panel.RowStyles.Add(new RowStyle(SizeType.Absolute, S(22)));
             panel.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
             retryEnabledCheckBox.Dock = DockStyle.Fill;
-            retryEnabledCheckBox.Margin = new Padding(0, 0, 0, 2);
+            retryEnabledCheckBox.Margin = new Padding(0, 0, 0, S(2));
             retryEnabledCheckBox.BackColor = UiTheme.CardBackground;
             retryEnabledCheckBox.Font = UiTheme.CreateFont(9f, FontStyle.Bold);
 
             panel.Controls.Add(retryEnabledCheckBox, 0, 0);
             panel.SetColumnSpan(retryEnabledCheckBox, 4);
-            AddRetryNumeric(panel, "\u6700\u5927\u91cd\u8bd5\u6b21\u6570", maxAttemptsUpDown, 0);
-            AddRetryNumeric(panel, "\u521d\u59cb\u5ef6\u65f6(\u79d2)", initialDelayUpDown, 1);
-            AddRetryNumeric(panel, "\u6700\u5927\u5ef6\u65f6(\u79d2)", maxDelayUpDown, 2);
-            AddRetryNumeric(panel, "\u91cd\u7f6e\u8ba1\u6570(\u79d2)", resetAfterUpDown, 3);
+            AddRetryNumeric(panel, "最大重试次数", maxAttemptsUpDown, 0);
+            AddRetryNumeric(panel, "初始延时(秒)", initialDelayUpDown, 1);
+            AddRetryNumeric(panel, "最大延时(秒)", maxDelayUpDown, 2);
+            AddRetryNumeric(panel, "重置计数(秒)", resetAfterUpDown, 3);
 
             shell.Controls.Add(panel);
             return shell;
@@ -710,8 +748,8 @@ namespace LocalWebTrayShell
         private void AddRetryNumeric(TableLayoutPanel panel, string labelText, NumericUpDown numeric, int column)
         {
             Label label = DialogUi.CreateSmallLabel(labelText);
-            label.Margin = new Padding(column == 0 ? 0 : 8, 0, 0, 0);
-            numeric.Margin = new Padding(column == 0 ? 0 : 8, 4, 0, 0);
+            label.Margin = new Padding(column == 0 ? 0 : S(8), 0, 0, 0);
+            numeric.Margin = new Padding(column == 0 ? 0 : S(8), S(4), 0, 0);
             numeric.Dock = DockStyle.Top;
 
             panel.Controls.Add(label, column, 1);
@@ -728,29 +766,43 @@ namespace LocalWebTrayShell
             resetAfterUpDown.Enabled = enabled;
         }
 
+        private void ShowError(string message, Control focusControl)
+        {
+            errorLabel.Text = message ?? string.Empty;
+
+            if (focusControl != null)
+            {
+                focusControl.Focus();
+            }
+        }
+
         private void OnSaveClicked(object sender, EventArgs e)
         {
             string name = nameTextBox.Text == null ? string.Empty : nameTextBox.Text.Trim();
             string command = commandTextBox.Text == null ? string.Empty : commandTextBox.Text.Trim();
             string runMode;
 
+            errorLabel.Text = string.Empty;
+
             if (string.IsNullOrWhiteSpace(name))
             {
-                MessageBox.Show(
-                    "\u8bf7\u8f93\u5165\u547d\u4ee4\u540d\u79f0\u3002",
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                ShowError("请输入命令名称。", nameTextBox);
                 return;
             }
 
             if (string.IsNullOrWhiteSpace(command))
             {
-                MessageBox.Show(
-                    "\u8bf7\u8f93\u5165\u8981\u6267\u884c\u7684\u547d\u4ee4\u3002",
-                    Text,
-                    MessageBoxButtons.OK,
-                    MessageBoxIcon.Warning);
+                ShowError("请输入要执行的命令。", commandTextBox);
+                return;
+            }
+
+            int invalidEnvLines;
+            EnvironmentVariableEntry[] environmentVariables =
+                ParseEnvironmentVariables(environmentTextBox.Text, out invalidEnvLines);
+
+            if (invalidEnvLines > 0)
+            {
+                ShowError("环境变量有 " + invalidEnvLines + " 行格式无效（应为 KEY=VALUE），请修正或删除。", environmentTextBox);
                 return;
             }
 
@@ -788,7 +840,7 @@ namespace LocalWebTrayShell
             Result.WorkingDirectory = workingDirectoryTextBox.Text == null
                 ? null
                 : workingDirectoryTextBox.Text.Trim();
-            Result.EnvironmentVariables = ParseEnvironmentVariables(environmentTextBox.Text);
+            Result.EnvironmentVariables = environmentVariables;
 
             DialogResult = DialogResult.OK;
             Close();
@@ -804,24 +856,32 @@ namespace LocalWebTrayShell
     {
         public static void StyleForm(Form form, string title, Size clientSize)
         {
+            Size scaled = new Size(UiTheme.Scale(clientSize.Width), UiTheme.Scale(clientSize.Height));
+            Rectangle workingArea = Screen.PrimaryScreen.WorkingArea;
+            int maxWidth = Math.Max(UiTheme.Scale(360), workingArea.Width - UiTheme.Scale(48));
+            int maxHeight = Math.Max(UiTheme.Scale(320), workingArea.Height - UiTheme.Scale(48));
+
             form.Text = title;
             form.FormBorderStyle = FormBorderStyle.FixedDialog;
             form.StartPosition = FormStartPosition.CenterParent;
             form.MaximizeBox = false;
             form.MinimizeBox = false;
             form.ShowInTaskbar = false;
-            form.ClientSize = clientSize;
+            form.ClientSize = new Size(Math.Min(scaled.Width, maxWidth), Math.Min(scaled.Height, maxHeight));
             form.BackColor = UiTheme.WindowBackground;
             form.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
-            form.AutoScaleMode = AutoScaleMode.Dpi;
+            form.AutoScaleMode = AutoScaleMode.None;
+            // If the screen is too small for the content (e.g. 768p with the command
+            // editor), the dialog scrolls instead of pushing the footer off-screen.
+            form.AutoScroll = true;
         }
 
         public static Control CreateModalHeader(string title, string subtitle)
         {
             Panel headerPanel = new Panel();
             headerPanel.Dock = DockStyle.Fill;
-            headerPanel.Margin = new Padding(0, 0, 0, 12);
-            headerPanel.Height = 56;
+            headerPanel.Margin = new Padding(0, 0, 0, UiTheme.Scale(12));
+            headerPanel.Height = UiTheme.Scale(56);
 
             Label titleLabel = new Label();
             titleLabel.Text = title;
@@ -829,7 +889,7 @@ namespace LocalWebTrayShell
             titleLabel.ForeColor = UiTheme.TextPrimary;
             titleLabel.AutoSize = false;
             titleLabel.Dock = DockStyle.Top;
-            titleLabel.Height = 28;
+            titleLabel.Height = UiTheme.Scale(28);
             titleLabel.TextAlign = ContentAlignment.MiddleLeft;
 
             Label subtitleLabel = new Label();
@@ -838,7 +898,7 @@ namespace LocalWebTrayShell
             subtitleLabel.ForeColor = UiTheme.TextMuted;
             subtitleLabel.AutoSize = false;
             subtitleLabel.Dock = DockStyle.Top;
-            subtitleLabel.Height = 22;
+            subtitleLabel.Height = UiTheme.Scale(22);
             subtitleLabel.TextAlign = ContentAlignment.MiddleLeft;
 
             headerPanel.Paint += delegate(object sender, PaintEventArgs e)
@@ -857,9 +917,13 @@ namespace LocalWebTrayShell
         public static TableLayoutPanel CreateLayout()
         {
             TableLayoutPanel layout = new TableLayoutPanel();
-            layout.Dock = DockStyle.Fill;
+            // Docked top + AutoSize so the owning form's AutoScroll can take over when
+            // the dialog is height-capped on small screens.
+            layout.Dock = DockStyle.Top;
+            layout.AutoSize = true;
+            layout.AutoSizeMode = AutoSizeMode.GrowAndShrink;
             layout.Margin = new Padding(0);
-            layout.Padding = new Padding(24, 18, 24, 20);
+            layout.Padding = UiTheme.ScalePadding(24, 18, 24, 20);
             layout.BackColor = UiTheme.WindowBackground;
             layout.ColumnCount = 1;
             layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -892,6 +956,20 @@ namespace LocalWebTrayShell
             return label;
         }
 
+        public static Label CreateErrorLabel()
+        {
+            Label label = new Label();
+            label.Text = string.Empty;
+            label.AutoSize = false;
+            label.Dock = DockStyle.Fill;
+            label.ForeColor = UiTheme.DangerForeground;
+            label.Font = UiTheme.CreateFont(8.75f, FontStyle.Regular);
+            label.Margin = new Padding(0, UiTheme.Scale(14), UiTheme.Scale(12), 0);
+            label.TextAlign = ContentAlignment.MiddleLeft;
+            label.AutoEllipsis = true;
+            return label;
+        }
+
         public static TextBox CreateTextBox(bool multiline)
         {
             TextBox textBox = new TextBox();
@@ -915,12 +993,14 @@ namespace LocalWebTrayShell
         {
             RoundedPanel frame = new RoundedPanel();
             frame.Dock = DockStyle.Fill;
-            frame.Margin = new Padding(0, 0, 0, 8);
-            frame.Padding = multiline ? new Padding(12, 10, 12, 10) : new Padding(12, 9, 12, 6);
+            frame.Margin = new Padding(0, 0, 0, UiTheme.Scale(8));
+            frame.Padding = multiline
+                ? UiTheme.ScalePadding(12, 10, 12, 10)
+                : UiTheme.ScalePadding(12, 9, 12, 6);
             frame.BackColor = UiTheme.Surface;
             frame.BorderColor = UiTheme.Border;
             frame.BorderWidth = 1f;
-            frame.CornerRadius = 7;
+            frame.CornerRadius = UiTheme.Scale(7);
             frame.Controls.Add(textBox);
 
             textBox.Enter += delegate
@@ -954,12 +1034,12 @@ namespace LocalWebTrayShell
         {
             RoundedPanel frame = new RoundedPanel();
             frame.Dock = DockStyle.Fill;
-            frame.Margin = new Padding(0, 0, 0, 8);
-            frame.Padding = new Padding(10, 7, 10, 5);
+            frame.Margin = new Padding(0, 0, 0, UiTheme.Scale(8));
+            frame.Padding = UiTheme.ScalePadding(10, 7, 10, 5);
             frame.BackColor = UiTheme.Surface;
             frame.BorderColor = UiTheme.Border;
             frame.BorderWidth = 1f;
-            frame.CornerRadius = 7;
+            frame.CornerRadius = UiTheme.Scale(7);
             frame.Controls.Add(comboBox);
 
             comboBox.Enter += delegate
@@ -982,7 +1062,7 @@ namespace LocalWebTrayShell
             NumericUpDown control = new NumericUpDown();
             control.Minimum = minimum;
             control.Maximum = maximum;
-            control.Width = 112;
+            control.Width = UiTheme.Scale(112);
             control.BorderStyle = BorderStyle.FixedSingle;
             control.BackColor = UiTheme.Surface;
             control.ForeColor = UiTheme.TextPrimary;
@@ -1006,9 +1086,9 @@ namespace LocalWebTrayShell
         {
             ThemedButton button = new ThemedButton();
             button.Text = text;
-            button.Size = new Size(100, 36);
+            button.Size = new Size(UiTheme.Scale(100), UiTheme.Scale(36));
             button.Font = UiTheme.CreateFont(9.5f, FontStyle.Bold);
-            button.CornerRadius = 8;
+            button.CornerRadius = UiTheme.Scale(8);
             button.Click += clickHandler;
             UiTheme.StylePrimaryButton(button);
             return button;
@@ -1017,28 +1097,43 @@ namespace LocalWebTrayShell
         public static ThemedButton CreateCancelButton()
         {
             ThemedButton button = new ThemedButton();
-            button.Text = "\u53d6\u6d88";
-            button.Size = new Size(100, 36);
+            button.Text = "取消";
+            button.Size = new Size(UiTheme.Scale(100), UiTheme.Scale(36));
             button.Font = UiTheme.CreateFont(9.5f, FontStyle.Regular);
-            button.CornerRadius = 8;
+            button.CornerRadius = UiTheme.Scale(8);
             button.DialogResult = DialogResult.Cancel;
             UiTheme.StyleSecondaryButton(button);
             return button;
         }
 
-        public static Control CreateFooter(ThemedButton saveButton, ThemedButton cancelButton)
+        // Footer with an inline error area (left) so validation feedback stays in the
+        // dialog instead of stacking modal message boxes.
+        public static Control CreateFooter(ThemedButton saveButton, ThemedButton cancelButton, Label errorLabel)
         {
-            FlowLayoutPanel footer = new FlowLayoutPanel();
+            Panel footer = new Panel();
             footer.Dock = DockStyle.Fill;
-            footer.FlowDirection = FlowDirection.RightToLeft;
-            footer.WrapContents = false;
-            footer.Padding = new Padding(0, 10, 0, 0);
             footer.Margin = new Padding(0);
             footer.BackColor = UiTheme.WindowBackground;
-            cancelButton.Margin = new Padding(10, 0, 0, 0);
+
+            Panel buttons = new Panel();
+            buttons.Dock = DockStyle.Right;
+            buttons.Width = UiTheme.Scale(212);
+            buttons.Margin = new Padding(0);
+            buttons.BackColor = UiTheme.WindowBackground;
+
+            saveButton.Location = new Point(0, UiTheme.Scale(10));
             saveButton.Margin = new Padding(0);
-            footer.Controls.Add(cancelButton);
-            footer.Controls.Add(saveButton);
+            cancelButton.Location = new Point(UiTheme.Scale(112), UiTheme.Scale(10));
+            cancelButton.Margin = new Padding(0);
+            buttons.Controls.Add(saveButton);
+            buttons.Controls.Add(cancelButton);
+
+            if (errorLabel != null)
+            {
+                footer.Controls.Add(errorLabel);
+            }
+
+            footer.Controls.Add(buttons);
             return footer;
         }
     }

@@ -19,6 +19,7 @@ namespace LocalWebTrayShell
         private static int Main(string[] args)
         {
             EnableDpiAwareness();
+            InitializeThemeDpiScale();
             AppLogger.Initialize();
 
             if (!EmbeddedDependencyBootstrapper.Initialize(true))
@@ -75,6 +76,23 @@ namespace LocalWebTrayShell
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
                 return 1;
+            }
+        }
+
+        // UiTheme scales every layout metric and font by this factor, so it must be
+        // captured after the process is marked DPI-aware (the screen DC reports the
+        // real DPI only then) and before any UI is created.
+        private static void InitializeThemeDpiScale()
+        {
+            try
+            {
+                using (System.Drawing.Graphics graphics = System.Drawing.Graphics.FromHwnd(IntPtr.Zero))
+                {
+                    UiTheme.SetDpiScale(graphics.DpiX / 96f);
+                }
+            }
+            catch
+            {
             }
         }
 

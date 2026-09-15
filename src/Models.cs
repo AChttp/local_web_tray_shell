@@ -18,6 +18,39 @@ namespace LocalWebTrayShell
 
         [DataMember(Name = "command_section_ratio")]
         public double CommandSectionRatio { get; set; }
+
+        [DataMember(Name = "window_left")]
+        public int WindowLeft { get; set; }
+
+        [DataMember(Name = "window_top")]
+        public int WindowTop { get; set; }
+
+        [DataMember(Name = "window_width")]
+        public int WindowWidth { get; set; }
+
+        [DataMember(Name = "window_height")]
+        public int WindowHeight { get; set; }
+
+        [DataMember(Name = "window_maximized")]
+        public bool WindowMaximized { get; set; }
+
+        [DataMember(Name = "sidebar_width")]
+        public int SidebarWidth { get; set; }
+
+        [DataMember(Name = "sidebar_hidden")]
+        public bool SidebarHidden { get; set; }
+
+        [DataMember(Name = "workspace_mode")]
+        public string WorkspaceMode { get; set; }
+
+        [DataMember(Name = "workspace_split_ratio")]
+        public double WorkspaceSplitRatio { get; set; }
+
+        [DataMember(Name = "selected_site_id")]
+        public string SelectedSiteId { get; set; }
+
+        [DataMember(Name = "selected_command_id")]
+        public string SelectedCommandId { get; set; }
     }
 
     [DataContract]
@@ -231,6 +264,43 @@ namespace LocalWebTrayShell
         Logs
     }
 
+    internal static class WorkspaceModeCatalog
+    {
+        public const string Web = "web";
+        public const string Split = "split";
+        public const string Logs = "logs";
+
+        public static string ToString(WorkspaceMode mode)
+        {
+            if (mode == WorkspaceMode.Split)
+            {
+                return Split;
+            }
+
+            if (mode == WorkspaceMode.Logs)
+            {
+                return Logs;
+            }
+
+            return Web;
+        }
+
+        public static WorkspaceMode Parse(string value)
+        {
+            if (string.Equals(value, Split, StringComparison.OrdinalIgnoreCase))
+            {
+                return WorkspaceMode.Split;
+            }
+
+            if (string.Equals(value, Logs, StringComparison.OrdinalIgnoreCase))
+            {
+                return WorkspaceMode.Logs;
+            }
+
+            return WorkspaceMode.Web;
+        }
+    }
+
     internal sealed class CommandRuntimeSnapshot
     {
         public string CommandId { get; set; }
@@ -284,6 +354,8 @@ namespace LocalWebTrayShell
         public string CommandId { get; set; }
 
         public string[] Lines { get; set; }
+
+        public bool[] ErrorFlags { get; set; }
 
         public int FirstSequence { get; set; }
 

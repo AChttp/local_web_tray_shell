@@ -37,21 +37,72 @@ namespace LocalWebTrayShell
         private const int HTBOTTOM = 15;
         private const int HTBOTTOMLEFT = 16;
         private const int HTBOTTOMRIGHT = 17;
-        private const int TitleBarHeight = 44;
-        private const int ResizeGripSize = 8;
+        private const int WM_ERASEBKGND = 0x0014;
+        private const int WM_GETMINMAXINFO = 0x0024;
+        private const int WM_DPICHANGED = 0x02E0;
+
+        // Design metrics at 96 DPI; everything reaches the screen through S().
+        private static int S(int value)
+        {
+            return UiTheme.Scale(value);
+        }
+
+        private static int TitleBarHeight
+        {
+            get { return S(44); }
+        }
+
+        private static int ResizeGripSize
+        {
+            get { return S(8); }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativePoint
+        {
+            public int X;
+            public int Y;
+        }
+
+        // Must match the Win32 MINMAXINFO layout exactly:
+        // ptReserved, ptMaxSize, ptMaxPosition, ptMinTrackSize, ptMaxTrackSize.
+        [StructLayout(LayoutKind.Sequential)]
+        private struct MinMaxInfo
+        {
+            public NativePoint Reserved;
+            public NativePoint MaxSize;
+            public NativePoint MaxPosition;
+            public NativePoint MinTrackSize;
+            public NativePoint MaxTrackSize;
+        }
+
         private const int WS_SYSMENU = 0x00080000;
         private const int WS_MINIMIZEBOX = 0x00020000;
         private const int WS_MAXIMIZEBOX = 0x00010000;
         private const int WS_CLIPCHILDREN = 0x02000000;
         private const int WS_CLIPSIBLINGS = 0x04000000;
         private const int DWMWA_TRANSITIONS_FORCEDISABLED = 3;
-        private const int WM_ERASEBKGND = 0x0014;
 
         [DllImport("dwmapi.dll", PreserveSig = true)]
         private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
 
         [DllImport("user32.dll")]
         private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+        [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+        private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, string lParam);
+
+        private const int EM_SETCUEBANNER = 0x1501;
+
+        private static void SetCueBanner(TextBox textBox, string cue)
+        {
+            if (textBox == null || string.IsNullOrEmpty(cue))
+            {
+                return;
+            }
+
+            SendMessage(textBox.Handle, EM_SETCUEBANNER, new IntPtr(1), cue);
+        }
 
         [DllImport("user32.dll")]
         private static extern bool ReleaseCapture();
@@ -89,7 +140,9 @@ namespace LocalWebTrayShell
         private readonly ThemedButton clearLogsButton;
         private readonly ThemedButton copyLogsButton;
         private readonly CheckBox autoScrollLogsCheckBox;
-        private readonly TextBox logsTextBox;
+        private readonly CheckBox wrapLogsCheckBox;
+        private readonly TextBox logFilterTextBox;
+        private readonly RichTextBox logsTextBox;
         private readonly DoubleBufferedPanel webViewHost;
         private readonly Timer uiRefreshTimer;
         private readonly Timer runtimeRefreshTimer;
@@ -145,10 +198,19 @@ namespace LocalWebTrayShell
         private readonly ThemedButton webCopyUrlButton;
         private readonly ThemedButton webOpenBrowserButton;
         private readonly WorkspaceSplitterPanel workspaceSplitter;
+        private readonly Panel navLeftPanel;
+        private readonly Panel navRightPanel;
+        private readonly ThemedButton titleMenuButton;
+        private readonly ContextMenuStrip titleMenu;
+        private ToolStripMenuItem titleStartupMenuItem;
         private ContextMenuStrip commandContextMenu;
         private ContextMenuStrip siteContextMenu;
-        private double workspaceSplitRatio = 0.58;
+        private double workspaceSplitRatio = AppConfigStore.DefaultWorkspaceSplitRatio;
         private bool draggingWorkspaceSplitter;
+        private string pendingSelectedSiteId;
+        private string pendingSelectedCommandId;
+        private string renderedLogFilter = string.Empty;
+        private float formDpiScale = 1.0f;
 
         public ShellForm()
         {
@@ -169,16 +231,21 @@ namespace LocalWebTrayShell
             commandManager.SyncCommands(commands);
             pendingHotkey = config.GlobalHotkey ?? HotkeyConstants.CreateDefault();
             pendingCommandSectionRatio = config.CommandSectionRatio;
+            pendingSelectedSiteId = config.SelectedSiteId;
+            pendingSelectedCommandId = config.SelectedCommandId;
 
-            workspaceMode = WorkspaceMode.Web;
+            workspaceMode = WorkspaceModeCatalog.Parse(config.WorkspaceMode);
+            workspaceSplitRatio = config.WorkspaceSplitRatio;
+            sidebarHidden = config.SidebarHidden;
 
             SetWindowTitle(AppName);
-            Width = 1540;
-            Height = 930;
-            MinimumSize = new Size(1240, 760);
+            AutoScaleMode = AutoScaleMode.None;
+            Font = UiTheme.CreateFont(9f, FontStyle.Regular);
+            formDpiScale = UiTheme.DpiScale;
+            MinimumSize = new Size(S(980), S(640));
             StartPosition = FormStartPosition.CenterScreen;
+            RestoreWindowPlacement(config);
             FormBorderStyle = FormBorderStyle.None;
-            AutoScaleMode = AutoScaleMode.Dpi;
             Icon = appIcon;
             BackColor = UiTheme.WindowBackground;
             preTrayWindowState = WindowState;
@@ -193,7 +260,9 @@ namespace LocalWebTrayShell
 
             statusLabel = new ToolStripStatusLabel("\u6b63\u5728\u52a0\u8f7d\u5de5\u4f5c\u53f0...");
             statusStrip = new StatusStrip();
+            statusStrip.SizingGrip = false;
             statusStrip.Items.Add(statusLabel);
+            UiTheme.ApplyModernMenuTheme(statusStrip);
 
             titleBarPanel = new DoubleBufferedPanel();
             titleBarPanel.Dock = DockStyle.Top;
@@ -206,7 +275,7 @@ namespace LocalWebTrayShell
             titleBarPanel.Resize += OnTitleBarResize;
 
             titleSidebarButton = new TitleBarIconButton(TitleBarButtonKind.Sidebar);
-            titleSidebarButton.Location = new Point(10, 6);
+            titleSidebarButton.Location = new Point(S(10), S(6));
             titleSidebarButton.SidebarCollapsed = sidebarHidden;
             titleSidebarButton.Click += OnSidebarToggleClicked;
 
@@ -233,8 +302,30 @@ namespace LocalWebTrayShell
             closeButton.Anchor = AnchorStyles.Top | AnchorStyles.Right;
             closeButton.Click += OnTitleCloseClicked;
 
+            titleMenu = new ContextMenuStrip();
+            titleMenu.Opening += OnTitleMenuOpening;
+            titleStartupMenuItem = new ToolStripMenuItem("开机自启");
+            titleStartupMenuItem.CheckOnClick = true;
+            titleStartupMenuItem.Click += OnTrayStartupMenuClicked;
+            titleMenu.Items.Add("快捷键设置…", null, delegate { OnConfigureHotkeyClicked(this, EventArgs.Empty); });
+            titleMenu.Items.Add(titleStartupMenuItem);
+            titleMenu.Items.Add(new ToolStripSeparator());
+            titleMenu.Items.Add("导入配置…", null, delegate { ImportConfig(); });
+            titleMenu.Items.Add("导出配置…", null, delegate { ExportConfig(); });
+            titleMenu.Items.Add("打开日志文件夹", null, delegate { OpenLogFolder(); });
+            titleMenu.Items.Add(new ToolStripSeparator());
+            titleMenu.Items.Add("退出", null, delegate { ExitApplication(); });
+            UiTheme.ApplyModernMenuTheme(titleMenu);
+
+            titleMenuButton = CreateToolbarButton("⋯", "菜单");
+            titleMenuButton.Click += delegate
+            {
+                titleMenu.Show(titleMenuButton, new Point(0, titleMenuButton.Height));
+            };
+
             titleBarPanel.Controls.Add(titleSidebarButton);
             titleBarPanel.Controls.Add(titleBarLabel);
+            titleBarPanel.Controls.Add(titleMenuButton);
             titleBarPanel.Controls.Add(minimizeButton);
             titleBarPanel.Controls.Add(maximizeButton);
             titleBarPanel.Controls.Add(closeButton);
@@ -249,10 +340,13 @@ namespace LocalWebTrayShell
 
             leftSidebar = new DoubleBufferedPanel();
             leftSidebar.Dock = DockStyle.None;
-            leftSidebar.Width = DefaultSidebarWidth;
+            expandedSidebarWidth = config.SidebarWidth > 0
+                ? Math.Max(S(SidebarMinExpandedWidth), Math.Min(S(SidebarMaxWidth), config.SidebarWidth))
+                : S(DefaultSidebarWidth);
+            leftSidebar.Width = expandedSidebarWidth;
             leftSidebar.BackColor = UiTheme.SidebarBackground;
             leftSidebar.Padding = new Padding(0);
-            expandedSidebarWidth = leftSidebar.Width;
+            leftSidebar.Visible = !sidebarHidden;
 
             sidebarSurface = new SidebarSurfaceControl();
             sidebarSurface.BackColor = UiTheme.SidebarBackground;
@@ -261,9 +355,6 @@ namespace LocalWebTrayShell
                 return commandManager.GetSnapshot(commandId);
             };
             sidebarSurface.StopAllCommandsClicked += OnStopAllCommandsClicked;
-            sidebarSurface.BackSiteClicked += OnBackSiteClicked;
-            sidebarSurface.HomeSiteClicked += OnHomeSiteClicked;
-            sidebarSurface.ReloadSiteClicked += OnReloadSiteClicked;
             sidebarSurface.WorkspaceModeRequested += OnSidebarWorkspaceModeRequested;
             sidebarSurface.CommandActivated += OnCommandListItemActivated;
             sidebarSurface.SiteActivated += OnSiteListItemActivated;
@@ -277,15 +368,22 @@ namespace LocalWebTrayShell
 
             sidebarSplitter = new SidebarSplitterPanel();
             sidebarSplitter.Dock = DockStyle.None;
+            sidebarSplitter.Collapsed = sidebarHidden;
             sidebarSplitter.MouseDown += OnSidebarSplitterMouseDown;
             sidebarSplitter.MouseMove += OnSidebarSplitterMouseMove;
             sidebarSplitter.MouseUp += OnSidebarSplitterMouseUp;
+            sidebarSplitter.MouseDoubleClick += delegate
+            {
+                // Double-click restores the default sidebar width.
+                SetSidebarWidth(S(DefaultSidebarWidth));
+                PersistConfig();
+            };
 
             leftSidebar.Controls.Add(sidebarSurface);
 
             workspacePanel = new DoubleBufferedPanel();
             workspacePanel.Dock = DockStyle.None;
-            workspacePanel.Padding = new Padding(14, 14, 14, 14);
+            workspacePanel.Padding = new Padding(S(14), S(14), S(14), S(14));
             workspacePanel.BackColor = BackColor;
 
             rightBody = new DoubleBufferedPanel();
@@ -295,72 +393,72 @@ namespace LocalWebTrayShell
             webPanel = new DoubleBufferedPanel();
             webPanel.Dock = DockStyle.None;
             webPanel.BackColor = UiTheme.Surface;
-            webPanel.Padding = new Padding(10);
+            webPanel.Padding = new Padding(S(10));
 
             webNavBar = new DoubleBufferedPanel();
             webNavBar.Dock = DockStyle.Top;
-            webNavBar.Height = 36;
+            webNavBar.Height = S(36);
             webNavBar.BackColor = UiTheme.Surface;
-            webNavBar.Padding = new Padding(0, 0, 0, 6);
+            webNavBar.Padding = new Padding(0, 0, 0, S(6));
 
-            Panel navLeft = new Panel();
-            navLeft.Dock = DockStyle.Left;
-            navLeft.Width = 144;
-            navLeft.BackColor = UiTheme.Surface;
+            navLeftPanel = new Panel();
+            navLeftPanel.Dock = DockStyle.Left;
+            navLeftPanel.Width = S(144);
+            navLeftPanel.BackColor = UiTheme.Surface;
 
-            webBackButton = CreateToolbarButton("\u2039", "\u8fd4\u56de\u4e0a\u4e00\u9875 (Alt+Left)");
-            webBackButton.Width = 32;
-            webBackButton.Height = 30;
+            webBackButton = CreateToolbarButton("‹", "返回上一页 (Alt+Left)");
+            webBackButton.Width = S(32);
+            webBackButton.Height = S(30);
             webBackButton.Location = new Point(0, 0);
             webBackButton.Click += delegate { GoBackCurrentSite(); };
 
-            webForwardButton = CreateToolbarButton("\u203a", "\u524d\u8fdb (Alt+Right)");
-            webForwardButton.Width = 32;
-            webForwardButton.Height = 30;
-            webForwardButton.Location = new Point(36, 0);
+            webForwardButton = CreateToolbarButton("›", "前进 (Alt+Right)");
+            webForwardButton.Width = S(32);
+            webForwardButton.Height = S(30);
+            webForwardButton.Location = new Point(S(36), 0);
             webForwardButton.Click += delegate { GoForwardCurrentSite(); };
 
-            webReloadButton = CreateToolbarButton("\u21bb", "\u5237\u65b0\u9875\u9762 (F5)");
-            webReloadButton.Width = 32;
-            webReloadButton.Height = 30;
-            webReloadButton.Location = new Point(72, 0);
+            webReloadButton = CreateToolbarButton("↻", "刷新页面 (F5)");
+            webReloadButton.Width = S(32);
+            webReloadButton.Height = S(30);
+            webReloadButton.Location = new Point(S(72), 0);
             webReloadButton.Click += delegate { ReloadCurrentSite(); };
 
-            webHomeButton = CreateToolbarButton("\u2302", "\u56de\u5230\u914d\u7f6e\u4e3b\u9875");
-            webHomeButton.Width = 32;
-            webHomeButton.Height = 30;
-            webHomeButton.Location = new Point(108, 0);
+            webHomeButton = CreateToolbarButton("⌂", "回到配置主页");
+            webHomeButton.Width = S(32);
+            webHomeButton.Height = S(30);
+            webHomeButton.Location = new Point(S(108), 0);
             webHomeButton.Click += delegate { NavigateCurrentSiteHome(); };
 
-            navLeft.Controls.Add(webBackButton);
-            navLeft.Controls.Add(webForwardButton);
-            navLeft.Controls.Add(webReloadButton);
-            navLeft.Controls.Add(webHomeButton);
+            navLeftPanel.Controls.Add(webBackButton);
+            navLeftPanel.Controls.Add(webForwardButton);
+            navLeftPanel.Controls.Add(webReloadButton);
+            navLeftPanel.Controls.Add(webHomeButton);
 
-            Panel navRight = new Panel();
-            navRight.Dock = DockStyle.Right;
-            navRight.Width = 148;
-            navRight.BackColor = UiTheme.Surface;
+            navRightPanel = new Panel();
+            navRightPanel.Dock = DockStyle.Right;
+            navRightPanel.Width = S(148);
+            navRightPanel.BackColor = UiTheme.Surface;
 
-            webCopyUrlButton = CreateToolbarButton("\u590d\u5236", "\u590d\u5236\u5f53\u524d\u7f51\u5740");
-            webCopyUrlButton.Width = 52;
-            webCopyUrlButton.Height = 30;
-            webCopyUrlButton.Location = new Point(6, 0);
+            webCopyUrlButton = CreateToolbarButton("复制", "复制当前网址");
+            webCopyUrlButton.Width = S(52);
+            webCopyUrlButton.Height = S(30);
+            webCopyUrlButton.Location = new Point(S(6), 0);
             webCopyUrlButton.Click += delegate { CopyCurrentSiteUrl(); };
 
-            webOpenBrowserButton = CreateToolbarButton("\u2197 \u6d4f\u89c8\u5668", "\u5728\u7cfb\u7edf\u9ed8\u8ba4\u6d4f\u89c8\u5668\u4e2d\u6253\u5f00");
-            webOpenBrowserButton.Width = 84;
-            webOpenBrowserButton.Height = 30;
-            webOpenBrowserButton.Location = new Point(62, 0);
+            webOpenBrowserButton = CreateToolbarButton("↗ 浏览器", "在系统默认浏览器中打开");
+            webOpenBrowserButton.Width = S(84);
+            webOpenBrowserButton.Height = S(30);
+            webOpenBrowserButton.Location = new Point(S(62), 0);
             webOpenBrowserButton.Click += delegate { OpenCurrentSiteInDefaultBrowser(); };
 
-            navRight.Controls.Add(webCopyUrlButton);
-            navRight.Controls.Add(webOpenBrowserButton);
+            navRightPanel.Controls.Add(webCopyUrlButton);
+            navRightPanel.Controls.Add(webOpenBrowserButton);
 
             RoundedPanel urlFrame = new RoundedPanel();
             urlFrame.Dock = DockStyle.Fill;
-            urlFrame.Margin = new Padding(6, 0, 6, 0);
-            urlFrame.Padding = new Padding(12, 7, 12, 6);
+            urlFrame.Margin = new Padding(S(6), 0, S(6), 0);
+            urlFrame.Padding = new Padding(S(12), S(7), S(12), S(6));
             urlFrame.BackColor = UiTheme.SecondaryBack;
             urlFrame.BorderColor = UiTheme.Border;
             urlFrame.BorderWidth = 1f;
@@ -389,8 +487,8 @@ namespace LocalWebTrayShell
             urlFrame.Controls.Add(webUrlTextBox);
 
             webNavBar.Controls.Add(urlFrame);
-            webNavBar.Controls.Add(navRight);
-            webNavBar.Controls.Add(navLeft);
+            webNavBar.Controls.Add(navRightPanel);
+            webNavBar.Controls.Add(navLeftPanel);
 
             webViewHost = new DoubleBufferedPanel();
             webViewHost.Dock = DockStyle.Fill;
@@ -407,12 +505,12 @@ namespace LocalWebTrayShell
             webStateLayout.ColumnCount = 3;
             webStateLayout.RowCount = 5;
             webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
-            webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 420f));
+            webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, S(420)));
             webStateLayout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 50f));
             webStateLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
-            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 36f));
-            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 48f));
-            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, 42f));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(36)));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(48)));
+            webStateLayout.RowStyles.Add(new RowStyle(SizeType.Absolute, S(42)));
             webStateLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 50f));
 
             webStateTitleLabel = new Label();
@@ -430,9 +528,9 @@ namespace LocalWebTrayShell
             webStateDetailLabel.AutoEllipsis = true;
             webStateDetailLabel.Text = "\u7b49\u5f85 WebView2 \u521d\u59cb\u5316\u3002";
 
-            webStateRetryButton = CreatePrimaryButton("\u91cd\u8bd5", 0, 0, 96);
+            webStateRetryButton = CreatePrimaryButton("重试", 0, 0, S(96));
             webStateRetryButton.Dock = DockStyle.Top;
-            webStateRetryButton.Margin = new Padding(156, 2, 156, 0);
+            webStateRetryButton.Margin = new Padding(S(156), S(2), S(156), 0);
             webStateRetryButton.Click += OnReloadSiteClicked;
 
             webStateLayout.Controls.Add(webStateTitleLabel, 1, 1);
@@ -447,10 +545,10 @@ namespace LocalWebTrayShell
             logsPanel = new DoubleBufferedPanel();
             logsPanel.Dock = DockStyle.None;
             logsPanel.BackColor = UiTheme.Surface;
-            logsPanel.Padding = new Padding(12);
+            logsPanel.Padding = new Padding(S(12));
 
             currentCommandLabel = new Label();
-            currentCommandLabel.Text = "\u672a\u9009\u62e9\u547d\u4ee4";
+            currentCommandLabel.Text = "未选择命令";
             currentCommandLabel.Font = UiTheme.CreateFont(11.5f, FontStyle.Bold);
             currentCommandLabel.ForeColor = UiTheme.TextPrimary;
             currentCommandLabel.AutoSize = true;
@@ -459,54 +557,79 @@ namespace LocalWebTrayShell
             currentCommandLabel.AutoEllipsis = true;
 
             commandStatusBadge = UiTheme.CreateBadgeLabel();
-            commandStatusBadge.Text = "\u5df2\u505c\u6b62";
-            commandStatusBadge.Size = new Size(104, 30);
+            commandStatusBadge.Text = "已停止";
+            commandStatusBadge.Size = new Size(S(104), S(30));
             commandStatusBadge.Dock = DockStyle.Right;
             commandStatusBadge.BackColor = UiTheme.BadgeNeutralBackground;
             commandStatusBadge.ForeColor = UiTheme.BadgeNeutralForeground;
 
-            clearLogsButton = CreateSecondaryButton("\u6e05\u7a7a\u65e5\u5fd7", 0, 0, 96);
+            clearLogsButton = CreateSecondaryButton("清空日志", 0, 0, S(92));
             clearLogsButton.Click += OnClearLogsClicked;
-            copyLogsButton = CreateSecondaryButton("\u590d\u5236\u65e5\u5fd7", 108, 0, 96);
+            copyLogsButton = CreateSecondaryButton("复制日志", 0, 0, S(92));
             copyLogsButton.Click += OnCopyLogsClicked;
+
+            logFilterTextBox = new TextBox();
+            logFilterTextBox.BorderStyle = BorderStyle.FixedSingle;
+            logFilterTextBox.BackColor = UiTheme.Surface;
+            logFilterTextBox.ForeColor = UiTheme.TextPrimary;
+            logFilterTextBox.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
+            logFilterTextBox.Size = new Size(S(112), S(24));
+            logFilterTextBox.Location = new Point(0, S(9));
+            logFilterTextBox.TextChanged += delegate { RefreshLogsView(); };
+            SetCueBanner(logFilterTextBox, "筛选日志...");
+
+            wrapLogsCheckBox = new CheckBox();
+            wrapLogsCheckBox.Text = "自动换行";
+            wrapLogsCheckBox.Checked = false;
+            wrapLogsCheckBox.AutoSize = true;
+            wrapLogsCheckBox.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
+            wrapLogsCheckBox.ForeColor = UiTheme.TextSecondary;
+            wrapLogsCheckBox.Location = new Point(S(120), S(12));
+            wrapLogsCheckBox.CheckedChanged += OnWrapLogsChanged;
+
             autoScrollLogsCheckBox = new CheckBox();
-            autoScrollLogsCheckBox.Text = "\u81ea\u52a8\u6eda\u52a8";
+            autoScrollLogsCheckBox.Text = "自动滚动";
             autoScrollLogsCheckBox.Checked = true;
             autoScrollLogsCheckBox.AutoSize = true;
             autoScrollLogsCheckBox.Font = UiTheme.CreateFont(9f, FontStyle.Regular);
             autoScrollLogsCheckBox.ForeColor = UiTheme.TextSecondary;
-            autoScrollLogsCheckBox.Location = new Point(0, 8);
+            autoScrollLogsCheckBox.Location = new Point(S(202), S(12));
             autoScrollLogsCheckBox.CheckedChanged += OnAutoScrollLogsChanged;
 
             Panel logsToolbar = new Panel();
             logsToolbar.Dock = DockStyle.Top;
-            logsToolbar.Height = 44;
+            logsToolbar.Height = S(44);
             logsToolbar.BackColor = UiTheme.Surface;
 
             Panel logsTitlePanel = new Panel();
-            logsTitlePanel.Dock = DockStyle.Left;
-            logsTitlePanel.Width = 560;
+            logsTitlePanel.Dock = DockStyle.Fill;
+            logsTitlePanel.BackColor = UiTheme.Surface;
             logsTitlePanel.Controls.Add(commandStatusBadge);
             logsTitlePanel.Controls.Add(currentCommandLabel);
 
             Panel logsActionPanel = new Panel();
             logsActionPanel.Dock = DockStyle.Right;
-            logsActionPanel.Width = 330;
+            logsActionPanel.Width = S(498);
+            logsActionPanel.BackColor = UiTheme.Surface;
+            logsActionPanel.Controls.Add(logFilterTextBox);
+            logsActionPanel.Controls.Add(wrapLogsCheckBox);
+            logsActionPanel.Controls.Add(autoScrollLogsCheckBox);
             logsActionPanel.Controls.Add(clearLogsButton);
             logsActionPanel.Controls.Add(copyLogsButton);
-            logsActionPanel.Controls.Add(autoScrollLogsCheckBox);
-            clearLogsButton.Location = new Point(126, 0);
-            copyLogsButton.Location = new Point(228, 0);
+            clearLogsButton.Location = new Point(S(300), S(7));
+            copyLogsButton.Location = new Point(S(400), S(7));
 
-            logsToolbar.Controls.Add(logsActionPanel);
+            // Fill-docked panel must be added before the right-docked one.
             logsToolbar.Controls.Add(logsTitlePanel);
+            logsToolbar.Controls.Add(logsActionPanel);
 
-            logsTextBox = new TextBox();
+            logsTextBox = new RichTextBox();
             logsTextBox.Dock = DockStyle.Fill;
-            logsTextBox.Multiline = true;
             logsTextBox.ReadOnly = true;
-            logsTextBox.ScrollBars = ScrollBars.Both;
+            logsTextBox.ScrollBars = RichTextBoxScrollBars.Both;
             logsTextBox.WordWrap = false;
+            logsTextBox.BorderStyle = BorderStyle.None;
+            logsTextBox.DetectUrls = false;
             logsTextBox.BackColor = UiTheme.TerminalBackground;
             logsTextBox.ForeColor = UiTheme.TerminalForeground;
             logsTextBox.Font = UiTheme.CreateMonospaceFont(10f, FontStyle.Regular);
@@ -515,11 +638,20 @@ namespace LocalWebTrayShell
             logsPanel.Controls.Add(logsToolbar);
 
             workspaceSplitter = new WorkspaceSplitterPanel();
-            workspaceSplitter.Height = 8;
+            workspaceSplitter.Height = S(8);
             workspaceSplitter.Visible = false;
             workspaceSplitter.MouseDown += OnWorkspaceSplitterMouseDown;
             workspaceSplitter.MouseMove += OnWorkspaceSplitterMouseMove;
             workspaceSplitter.MouseUp += OnWorkspaceSplitterMouseUp;
+            workspaceSplitter.MouseDoubleClick += delegate
+            {
+                if (workspaceMode == WorkspaceMode.Split)
+                {
+                    workspaceSplitRatio = AppConfigStore.DefaultWorkspaceSplitRatio;
+                    LayoutRightBodyContent();
+                    PersistConfig();
+                }
+            };
 
             rightBody.Controls.Add(webPanel);
             rightBody.Controls.Add(workspaceSplitter);
@@ -540,10 +672,10 @@ namespace LocalWebTrayShell
             trayMenu = new ContextMenuStrip();
             trayMenu.Opening += delegate { AppLogger.Info("tray", "托盘菜单打开"); };
             trayMenu.Closed += delegate(object sender, ToolStripDropDownClosedEventArgs e) { AppLogger.Info("tray", "托盘菜单关闭 reason=" + e.CloseReason); };
-            trayMenu.Items.Add("\u6253\u5f00\u4e3b\u754c\u9762", null, delegate { RestoreFromTray(); });
-            trayMenu.Items.Add("\u663e\u793a\u63a7\u5236\u53f0", null, delegate { RestoreFromTray(); SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth); });
-            trayMenu.Items.Add("\u5237\u65b0\u5f53\u524d\u9875\u9762", null, delegate { ReloadCurrentSite(); });
-            trayMenu.Items.Add("\u5168\u90e8\u505c\u6b62\u547d\u4ee4", null, delegate { ConfirmAndStopAll(); });
+            trayMenu.Items.Add("打开主界面", null, delegate { RestoreFromTray(); });
+            trayMenu.Items.Add("刷新当前页面", null, delegate { ReloadCurrentSite(); });
+            trayMenu.Items.Add("启动自启命令", null, delegate { commandManager.StartEnabledCommands(commands); });
+            trayMenu.Items.Add("全部停止命令", null, delegate { ConfirmAndStopAll(); });
             trayStartupMenuItem = new ToolStripMenuItem("\u5f00\u673a\u81ea\u542f");
             trayStartupMenuItem.CheckOnClick = true;
             trayStartupMenuItem.Click += OnTrayStartupMenuClicked;
@@ -576,9 +708,7 @@ namespace LocalWebTrayShell
             runtimeRefreshTimer.Interval = 100;
             runtimeRefreshTimer.Tick += OnRuntimeRefreshTimerTick;
 
-            updatingStartupToggle = true;
-            trayStartupMenuItem.Checked = WindowsStartupManager.IsEnabled();
-            updatingStartupToggle = false;
+            SyncStartupMenuItems(WindowsStartupManager.IsEnabled());
 
             UiTheme.ApplyModernMenuTheme(trayMenu);
             InitializeContextMenus();
@@ -594,7 +724,9 @@ namespace LocalWebTrayShell
             {
                 if (e != null && e.Item != null)
                 {
-                    SelectSite(e.Item);
+                    // Right-click selects the entry without forcing a workspace-mode
+                    // switch or a navigation; actions in the menu decide what happens.
+                    SelectSite(e.Item, false);
                     siteContextMenu.Show(e.ScreenLocation);
                 }
             };
@@ -616,11 +748,12 @@ namespace LocalWebTrayShell
 
             Shown += OnShown;
             Resize += OnResize;
+            ResizeEnd += delegate { PersistConfig(); };
             FormClosing += OnFormClosing;
 
             RefreshCommandList();
             RefreshSiteList();
-            SetWorkspaceMode(WorkspaceMode.Web);
+            SetWorkspaceMode(workspaceMode);
             RefreshCommandButtons();
             RefreshSiteButtons();
             UpdateStatusSummary();
@@ -650,14 +783,30 @@ namespace LocalWebTrayShell
                 uiRefreshTimer.Start();
                 RestartSiteHealthProbe();
 
-                if (commands.Count > 0)
+                CommandEntry commandToSelect = FindCommandById(pendingSelectedCommandId);
+                SiteEntry siteToSelect = FindSiteById(pendingSelectedSiteId);
+                pendingSelectedCommandId = null;
+                pendingSelectedSiteId = null;
+
+                if (commandToSelect == null && commands.Count > 0)
                 {
-                    SelectCommand(commands[0], false);
+                    commandToSelect = commands[0];
                 }
 
-                if (sites.Count > 0)
+                if (siteToSelect == null && sites.Count > 0)
                 {
-                    SelectSite(sites[0]);
+                    siteToSelect = sites[0];
+                }
+
+                if (commandToSelect != null)
+                {
+                    SelectCommand(commandToSelect, false);
+                }
+
+                if (siteToSelect != null)
+                {
+                    // In Logs mode a plain selection is enough; Web/Split activate the view.
+                    SelectSite(siteToSelect, workspaceMode != WorkspaceMode.Logs);
                 }
 
                 if (!startupCommandsRequested)
@@ -707,7 +856,222 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            if (m.Msg == WM_GETMINMAXINFO)
+            {
+                HandleGetMinMaxInfo(ref m);
+                return;
+            }
+
+            if (m.Msg == WM_DPICHANGED)
+            {
+                HandleDpiChanged(m);
+                base.WndProc(ref m);
+                return;
+            }
+
             base.WndProc(ref m);
+        }
+
+        // A borderless window maximizes over the ENTIRE screen (taskbar included)
+        // unless the system is told otherwise. Clip the maximized bounds to the
+        // working area of the monitor the window is on.
+        private void HandleGetMinMaxInfo(ref Message m)
+        {
+            Rectangle workingArea = Screen.FromHandle(Handle).WorkingArea;
+            MinMaxInfo info = (MinMaxInfo)Marshal.PtrToStructure(m.LParam, typeof(MinMaxInfo));
+
+            info.MaxSize = new NativePoint { X = workingArea.Width, Y = workingArea.Height };
+            info.MaxPosition = new NativePoint { X = workingArea.Left, Y = workingArea.Top };
+            info.MinTrackSize = new NativePoint { X = MinimumSize.Width, Y = MinimumSize.Height };
+
+            Marshal.StructureToPtr(info, m.LParam, true);
+            m.Result = IntPtr.Zero;
+        }
+
+        private void HandleDpiChanged(Message m)
+        {
+            float oldScale = formDpiScale;
+            int dpi = unchecked((short)((long)m.WParam & 0xFFFF));
+
+            if (dpi > 0)
+            {
+                UiTheme.SetDpiScale(dpi / 96f);
+                formDpiScale = UiTheme.DpiScale;
+            }
+
+            // lParam carries the system-suggested window rect for the new DPI.
+            if (m.LParam != IntPtr.Zero)
+            {
+                NativeRect suggested = (NativeRect)Marshal.PtrToStructure(m.LParam, typeof(NativeRect));
+
+                if (WindowState == FormWindowState.Normal)
+                {
+                    Bounds = new Rectangle(
+                        suggested.Left,
+                        suggested.Top,
+                        Math.Max(MinimumSize.Width, suggested.Right - suggested.Left),
+                        Math.Max(MinimumSize.Height, suggested.Bottom - suggested.Top));
+                }
+            }
+
+            RescaleFonts(this, oldScale, UiTheme.DpiScale);
+            UiTheme.ApplyModernMenuTheme(trayMenu);
+            UiTheme.ApplyModernMenuTheme(titleMenu);
+            UiTheme.ApplyModernMenuTheme(statusStrip);
+            ApplyDpiSizes();
+        }
+
+        // UiTheme fonts are pixel-unit and sized for the scale at creation time;
+        // after a DPI change they must be rebuilt at the new scale.
+        private static void RescaleFonts(Control control, float oldScale, float newScale)
+        {
+            if (oldScale <= 0.01f || Math.Abs(oldScale - newScale) < 0.001f)
+            {
+                return;
+            }
+
+            Font font = control.Font;
+
+            if (font != null && font.Unit == GraphicsUnit.Pixel)
+            {
+                float designPixels = font.Size / oldScale;
+                control.Font = new Font(font.FontFamily, designPixels * newScale, font.Style, GraphicsUnit.Pixel);
+            }
+
+            foreach (Control child in control.Controls)
+            {
+                RescaleFonts(child, oldScale, newScale);
+            }
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        private struct NativeRect
+        {
+            public int Left;
+            public int Top;
+            public int Right;
+            public int Bottom;
+        }
+
+        // Re-apply every DPI-dependent size after the scale factor changed. Fonts on        // native controls keep their pixel size (UiTheme fonts are pixel-based), so
+        // they are recreated here from their current design size.
+        private void ApplyDpiSizes()
+        {
+            titleBarPanel.Height = TitleBarHeight;
+            webNavBar.Height = S(36);
+            webNavBar.Padding = new Padding(0, 0, 0, S(6));
+            navLeftPanel.Width = S(144);
+            navRightPanel.Width = S(148);
+            logsPanel.Padding = new Padding(S(12));
+            workspacePanel.Padding = new Padding(S(14), S(14), S(14), S(14));
+            workspaceSplitter.Height = S(8);
+
+            LayoutTitleBarControls();
+            LayoutShellPanels(true);
+        }
+
+        private void RestoreWindowPlacement(AppConfig config)
+        {
+            Rectangle workingArea = Screen.PrimaryScreen.WorkingArea;
+            Size defaultSize = new Size(
+                Math.Min(S(1540), Math.Max(S(980), workingArea.Width - S(80))),
+                Math.Min(S(930), Math.Max(S(640), workingArea.Height - S(80))));
+
+            if (config.WindowWidth >= S(480) && config.WindowHeight >= S(360))
+            {
+                Rectangle saved = new Rectangle(config.WindowLeft, config.WindowTop, config.WindowWidth, config.WindowHeight);
+                bool onScreen = false;
+
+                foreach (Screen screen in Screen.AllScreens)
+                {
+                    if (screen.WorkingArea.IntersectsWith(saved))
+                    {
+                        onScreen = true;
+                        break;
+                    }
+                }
+
+                if (onScreen)
+                {
+                    StartPosition = FormStartPosition.Manual;
+                    Bounds = saved;
+                }
+                else
+                {
+                    Size = defaultSize;
+                }
+            }
+            else
+            {
+                Size = defaultSize;
+            }
+
+            if (config.WindowMaximized)
+            {
+                WindowState = FormWindowState.Maximized;
+            }
+        }
+
+        private Rectangle GetPersistableBounds()
+        {
+            return WindowState == FormWindowState.Normal ? Bounds : RestoreBounds;
+        }
+
+        protected override bool ProcessCmdKey(ref Message msg, Keys keyData)
+        {
+            if (keyData == (Keys.Control | Keys.D1))
+            {
+                SetWorkspaceMode(WorkspaceMode.Web);
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.D2))
+            {
+                SetWorkspaceMode(WorkspaceMode.Split);
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.D3))
+            {
+                SetWorkspaceMode(WorkspaceMode.Logs);
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.B))
+            {
+                OnSidebarToggleClicked(this, EventArgs.Empty);
+                return true;
+            }
+
+            if (keyData == Keys.F5)
+            {
+                ReloadCurrentSite();
+                return true;
+            }
+
+            if (keyData == (Keys.Alt | Keys.Left))
+            {
+                GoBackCurrentSite();
+                return true;
+            }
+
+            if (keyData == (Keys.Alt | Keys.Right))
+            {
+                GoForwardCurrentSite();
+                return true;
+            }
+
+            if (keyData == (Keys.Control | Keys.L))
+            {
+                if (webUrlTextBox != null && webUrlTextBox.Enabled)
+                {
+                    webUrlTextBox.Focus();
+                    webUrlTextBox.SelectAll();
+                }
+                return true;
+            }
+
+            return base.ProcessCmdKey(ref msg, keyData);
         }
 
         private void HandleWindowHitTest(ref Message m)
@@ -715,57 +1079,63 @@ namespace LocalWebTrayShell
             Point clientPoint = PointToClient(new Point(
                 unchecked((short)((long)m.LParam & 0xFFFF)),
                 unchecked((short)(((long)m.LParam >> 16) & 0xFFFF))));
-            bool left = clientPoint.X <= ResizeGripSize;
-            bool right = clientPoint.X >= ClientSize.Width - ResizeGripSize;
-            bool top = clientPoint.Y <= ResizeGripSize;
-            bool bottom = clientPoint.Y >= ClientSize.Height - ResizeGripSize;
 
-            if (left && top)
+            // While maximized the window must not offer resize edges; dragging the
+            // screen edge would otherwise tear the window out of the maximized state.
+            if (WindowState != FormWindowState.Maximized)
             {
-                m.Result = new IntPtr(HTTOPLEFT);
-                return;
-            }
+                bool left = clientPoint.X <= ResizeGripSize;
+                bool right = clientPoint.X >= ClientSize.Width - ResizeGripSize;
+                bool top = clientPoint.Y <= ResizeGripSize;
+                bool bottom = clientPoint.Y >= ClientSize.Height - ResizeGripSize;
 
-            if (right && top)
-            {
-                m.Result = new IntPtr(HTTOPRIGHT);
-                return;
-            }
+                if (left && top)
+                {
+                    m.Result = new IntPtr(HTTOPLEFT);
+                    return;
+                }
 
-            if (left && bottom)
-            {
-                m.Result = new IntPtr(HTBOTTOMLEFT);
-                return;
-            }
+                if (right && top)
+                {
+                    m.Result = new IntPtr(HTTOPRIGHT);
+                    return;
+                }
 
-            if (right && bottom)
-            {
-                m.Result = new IntPtr(HTBOTTOMRIGHT);
-                return;
-            }
+                if (left && bottom)
+                {
+                    m.Result = new IntPtr(HTBOTTOMLEFT);
+                    return;
+                }
 
-            if (left)
-            {
-                m.Result = new IntPtr(HTLEFT);
-                return;
-            }
+                if (right && bottom)
+                {
+                    m.Result = new IntPtr(HTBOTTOMRIGHT);
+                    return;
+                }
 
-            if (right)
-            {
-                m.Result = new IntPtr(HTRIGHT);
-                return;
-            }
+                if (left)
+                {
+                    m.Result = new IntPtr(HTLEFT);
+                    return;
+                }
 
-            if (top)
-            {
-                m.Result = new IntPtr(HTTOP);
-                return;
-            }
+                if (right)
+                {
+                    m.Result = new IntPtr(HTRIGHT);
+                    return;
+                }
 
-            if (bottom)
-            {
-                m.Result = new IntPtr(HTBOTTOM);
-                return;
+                if (top)
+                {
+                    m.Result = new IntPtr(HTTOP);
+                    return;
+                }
+
+                if (bottom)
+                {
+                    m.Result = new IntPtr(HTBOTTOM);
+                    return;
+                }
             }
 
             if (clientPoint.Y >= 0 &&
@@ -785,6 +1155,7 @@ namespace LocalWebTrayShell
             Control child = titleBarPanel.GetChildAtPoint(titlePoint);
 
             return child == titleSidebarButton ||
+                child == titleMenuButton ||
                 child == minimizeButton ||
                 child == maximizeButton ||
                 child == closeButton;
@@ -1064,20 +1435,24 @@ namespace LocalWebTrayShell
 
         private void OnCommandReorderRequested(object sender, SidebarReorderEventArgs e)
         {
-            if (e == null)
+            if (e == null || string.IsNullOrEmpty(e.Id))
             {
                 return;
             }
 
-            int target = e.Index + e.Delta;
+            int index = commands.FindIndex(delegate(CommandEntry command)
+            {
+                return string.Equals(command.Id, e.Id, StringComparison.OrdinalIgnoreCase);
+            });
+            int target = index + e.Delta;
 
-            if (e.Index < 0 || target < 0 || e.Index >= commands.Count || target >= commands.Count)
+            if (index < 0 || target < 0 || target >= commands.Count)
             {
                 return;
             }
 
-            CommandEntry temporary = commands[e.Index];
-            commands[e.Index] = commands[target];
+            CommandEntry temporary = commands[index];
+            commands[index] = commands[target];
             commands[target] = temporary;
 
             PersistAndSyncCommands();
@@ -1087,20 +1462,24 @@ namespace LocalWebTrayShell
 
         private void OnSiteReorderRequested(object sender, SidebarReorderEventArgs e)
         {
-            if (e == null)
+            if (e == null || string.IsNullOrEmpty(e.Id))
             {
                 return;
             }
 
-            int target = e.Index + e.Delta;
+            int index = sites.FindIndex(delegate(SiteEntry site)
+            {
+                return string.Equals(site.Id, e.Id, StringComparison.OrdinalIgnoreCase);
+            });
+            int target = index + e.Delta;
 
-            if (e.Index < 0 || target < 0 || e.Index >= sites.Count || target >= sites.Count)
+            if (index < 0 || target < 0 || target >= sites.Count)
             {
                 return;
             }
 
-            SiteEntry temporary = sites[e.Index];
-            sites[e.Index] = sites[target];
+            SiteEntry temporary = sites[index];
+            sites[index] = sites[target];
             sites[target] = temporary;
 
             PersistConfig();
@@ -1145,10 +1524,22 @@ namespace LocalWebTrayShell
 
         private void SelectSite(SiteEntry site)
         {
+            SelectSite(site, true);
+        }
+
+        // activate=false selects the entry visually (right-click context menus) without
+        // forcing a workspace-mode switch or navigating the embedded browser.
+        private void SelectSite(SiteEntry site, bool activate)
+        {
             currentSite = site;
             UpdateSiteSelectionVisuals();
             RefreshSiteButtons();
             RefreshWebNavigationVisuals();
+
+            if (!activate)
+            {
+                return;
+            }
 
             if (workspaceMode != WorkspaceMode.Split)
             {
@@ -1309,6 +1700,53 @@ namespace LocalWebTrayShell
             state.ProxyKey = newProxyKey;
         }
 
+        private void DisposeSiteViewsNotIn(List<SiteEntry> keep)
+        {
+            List<string> staleIds = new List<string>();
+
+            foreach (KeyValuePair<string, SiteViewState> pair in siteViews)
+            {
+                bool found = false;
+
+                for (int index = 0; index < keep.Count; index++)
+                {
+                    if (string.Equals(keep[index].Id, pair.Key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+
+                if (!found)
+                {
+                    staleIds.Add(pair.Key);
+                }
+            }
+
+            for (int index = 0; index < staleIds.Count; index++)
+            {
+                SiteViewState state = siteViews[staleIds[index]];
+                webViewHost.Controls.Remove(state.WebView);
+                state.WebView.NavigationStarting -= OnNavigationStarting;
+                state.WebView.NavigationCompleted -= OnNavigationCompleted;
+
+                if (state.WebView.CoreWebView2 != null)
+                {
+                    state.WebView.CoreWebView2.NewWindowRequested -= OnNewWindowRequested;
+                }
+
+                try
+                {
+                    state.WebView.Dispose();
+                }
+                catch
+                {
+                }
+
+                siteViews.Remove(staleIds[index]);
+            }
+        }
+
         private string GetSiteProxyKey(SiteEntry site)
         {
             if (site == null || !site.ProxyEnabled || string.IsNullOrWhiteSpace(site.ProxyServer))
@@ -1405,14 +1843,22 @@ namespace LocalWebTrayShell
                 return;
             }
 
-            webView.Navigate(e.Uri);
-
-            if (currentSite != null &&
-                string.Equals(state.Site.Id, currentSite.Id, StringComparison.OrdinalIgnoreCase))
+            // Popups (target=_blank etc.) used to be forced into the current view,
+            // throwing away the page the user was on. Open them in the system
+            // browser instead so the embedded page keeps its state.
+            try
             {
-                SetWorkspaceMode(WorkspaceMode.Web);
-                SetTransientStatus("\u6b63\u5728\u5f53\u524d\u9875\u6253\u5f00\u94fe\u63a5...");
-                RefreshSiteButtons();
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = e.Uri,
+                    UseShellExecute = true
+                });
+                SetTransientStatus("已在外部浏览器打开新窗口链接。");
+            }
+            catch (Exception ex)
+            {
+                AppLogger.Warn("web", "无法在外部浏览器打开链接: " + e.Uri + " " + ex.Message);
+                SetTransientStatus("无法打开新窗口链接。", 4, true);
             }
         }
 
@@ -2210,11 +2656,7 @@ namespace LocalWebTrayShell
             {
                 if (currentCommand != null)
                 {
-                    int idx = commands.IndexOf(currentCommand);
-                    if (idx > 0)
-                    {
-                        OnCommandReorderRequested(this, new SidebarReorderEventArgs(idx, -1));
-                    }
+                    OnCommandReorderRequested(this, new SidebarReorderEventArgs(currentCommand.Id, -1));
                 }
             };
 
@@ -2223,11 +2665,7 @@ namespace LocalWebTrayShell
             {
                 if (currentCommand != null)
                 {
-                    int idx = commands.IndexOf(currentCommand);
-                    if (idx >= 0 && idx < commands.Count - 1)
-                    {
-                        OnCommandReorderRequested(this, new SidebarReorderEventArgs(idx, 1));
-                    }
+                    OnCommandReorderRequested(this, new SidebarReorderEventArgs(currentCommand.Id, 1));
                 }
             };
 
@@ -2295,11 +2733,7 @@ namespace LocalWebTrayShell
             {
                 if (currentSite != null)
                 {
-                    int idx = sites.IndexOf(currentSite);
-                    if (idx > 0)
-                    {
-                        OnSiteReorderRequested(this, new SidebarReorderEventArgs(idx, -1));
-                    }
+                    OnSiteReorderRequested(this, new SidebarReorderEventArgs(currentSite.Id, -1));
                 }
             };
 
@@ -2308,11 +2742,7 @@ namespace LocalWebTrayShell
             {
                 if (currentSite != null)
                 {
-                    int idx = sites.IndexOf(currentSite);
-                    if (idx >= 0 && idx < sites.Count - 1)
-                    {
-                        OnSiteReorderRequested(this, new SidebarReorderEventArgs(idx, 1));
-                    }
+                    OnSiteReorderRequested(this, new SidebarReorderEventArgs(currentSite.Id, 1));
                 }
             };
 
@@ -2414,36 +2844,61 @@ namespace LocalWebTrayShell
                 draggingWorkspaceSplitter = false;
                 workspaceSplitter.Capture = false;
                 workspaceSplitter.Active = false;
+                PersistConfig();
             }
         }
 
         private void OnClearLogsClicked(object sender, EventArgs e)
         {
-            if (currentCommand != null)
+            if (currentCommand == null)
             {
-                commandManager.ClearLogs(currentCommand.Id);
-                RefreshLogsView();
+                return;
             }
+
+            if (MessageBox.Show(
+                    "确认清空该命令的全部日志吗？",
+                    AppName,
+                    MessageBoxButtons.YesNo,
+                    MessageBoxIcon.Question) != DialogResult.Yes)
+            {
+                return;
+            }
+
+            commandManager.ClearLogs(currentCommand.Id);
+            RefreshLogsView();
         }
 
         private void OnCopyLogsClicked(object sender, EventArgs e)
         {
-            if (!string.IsNullOrWhiteSpace(logsTextBox.Text))
+            // With an active selection, copy only the selection; otherwise copy all.
+            string text = logsTextBox.SelectionLength > 0
+                ? logsTextBox.SelectedText
+                : logsTextBox.Text;
+
+            if (!string.IsNullOrWhiteSpace(text))
             {
                 try
                 {
-                    Clipboard.SetText(logsTextBox.Text);
-                    SetTransientStatus("\u65e5\u5fd7\u5df2\u590d\u5236\u5230\u526a\u8d34\u677f\u3002");
+                    Clipboard.SetText(text);
+                    SetTransientStatus("日志已复制到剪贴板。");
                 }
                 catch (Exception ex)
                 {
                     MessageBox.Show(
-                        "\u65e0\u6cd5\u590d\u5236\u65e5\u5fd7\u3002\r\n\r\n" + ex.Message,
+                        "无法复制日志。\r\n\r\n" + ex.Message,
                         AppName,
                         MessageBoxButtons.OK,
                         MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private void OnWrapLogsChanged(object sender, EventArgs e)
+        {
+            logsTextBox.WordWrap = wrapLogsCheckBox.Checked;
+            logsTextBox.ScrollBars = wrapLogsCheckBox.Checked
+                ? RichTextBoxScrollBars.ForcedVertical
+                : RichTextBoxScrollBars.Both;
         }
 
         private void OnAutoScrollLogsChanged(object sender, EventArgs e)
@@ -2502,9 +2957,6 @@ namespace LocalWebTrayShell
             sidebarSurface.EditSiteEnabled = hasSite;
             sidebarSurface.DeleteSiteEnabled = hasSite && sites.Count > 1;
             sidebarSurface.OpenSiteEnabled = hasSite;
-            sidebarSurface.BackSiteEnabled = CanCurrentSiteGoBack();
-            sidebarSurface.HomeSiteEnabled = hasSite;
-            sidebarSurface.ReloadSiteEnabled = hasSite;
             sidebarSurface.Invalidate();
         }
 
@@ -2559,16 +3011,28 @@ namespace LocalWebTrayShell
             lastLogAutoScrollEnabled = autoScrollLogsCheckBox.Checked && shouldAutoScroll;
         }
 
+        private string GetLogFilter()
+        {
+            return logFilterTextBox == null || string.IsNullOrWhiteSpace(logFilterTextBox.Text)
+                ? string.Empty
+                : logFilterTextBox.Text.Trim();
+        }
+
         private void UpdateLogsText(string commandId, CommandLogSnapshot snapshot, bool shouldAutoScroll)
         {
             string[] lines = snapshot == null || snapshot.Lines == null
                 ? new string[0]
                 : snapshot.Lines;
+            bool[] errorFlags = snapshot == null || snapshot.ErrorFlags == null
+                ? new bool[0]
+                : snapshot.ErrorFlags;
+            string filter = GetLogFilter();
 
             if (snapshot != null &&
                 string.Equals(renderedLogCommandId, commandId, StringComparison.OrdinalIgnoreCase) &&
                 renderedLogFirstSequence == snapshot.FirstSequence &&
-                renderedLogNextSequence == snapshot.NextSequence)
+                renderedLogNextSequence == snapshot.NextSequence &&
+                string.Equals(renderedLogFilter, filter, StringComparison.Ordinal))
             {
                 return;
             }
@@ -2577,23 +3041,21 @@ namespace LocalWebTrayShell
             int selectionStart = shouldAutoScroll ? 0 : logsTextBox.SelectionStart;
             int selectionLength = shouldAutoScroll ? 0 : logsTextBox.SelectionLength;
 
-            if (CanAppendLogLines(commandId, snapshot, lines))
+            if (string.IsNullOrEmpty(filter) &&
+                string.Equals(renderedLogFilter, filter, StringComparison.Ordinal) &&
+                CanAppendLogLines(commandId, snapshot, lines))
             {
-                AppendLogLines(snapshot, lines);
+                AppendLogLines(snapshot, lines, errorFlags);
             }
             else
             {
-                string newText = string.Join(Environment.NewLine, lines);
-
-                if (!string.Equals(logsTextBox.Text, newText, StringComparison.Ordinal))
-                {
-                    logsTextBox.Text = newText;
-                }
+                RebuildLogText(lines, errorFlags, filter);
             }
 
             renderedLogCommandId = commandId;
             renderedLogFirstSequence = snapshot == null ? 0 : snapshot.FirstSequence;
             renderedLogNextSequence = snapshot == null ? 0 : snapshot.NextSequence;
+            renderedLogFilter = filter;
 
             if (!shouldAutoScroll)
             {
@@ -2602,6 +3064,79 @@ namespace LocalWebTrayShell
                 logsTextBox.Select(selectionStart, selectionLength);
                 ScrollTextBoxToFirstVisibleLine(logsTextBox, firstVisibleLine);
             }
+        }
+
+        // Full repaint path: writes the (optionally filtered) lines and colors stderr
+        // lines, batching consecutive same-color runs to keep large buffers fast.
+        private void RebuildLogText(string[] lines, bool[] errorFlags, string filter)
+        {
+            SuspendRedraw(logsTextBox);
+
+            try
+            {
+                logsTextBox.Clear();
+
+                if (lines.Length > 0)
+                {
+                    bool pendingError = false;
+                    StringBuilder run = new StringBuilder();
+                    bool anyWritten = false;
+
+                    for (int index = 0; index < lines.Length; index++)
+                    {
+                        if (!string.IsNullOrEmpty(filter) &&
+                            (lines[index] == null ||
+                             lines[index].IndexOf(filter, StringComparison.OrdinalIgnoreCase) < 0))
+                        {
+                            continue;
+                        }
+
+                        bool isError = index < errorFlags.Length && errorFlags[index];
+
+                        if (anyWritten && isError != pendingError)
+                        {
+                            AppendColoredRun(run.ToString(), pendingError);
+                            run.Length = 0;
+                            anyWritten = false;
+                        }
+
+                        if (anyWritten)
+                        {
+                            run.Append(Environment.NewLine);
+                        }
+
+                        run.Append(lines[index]);
+                        pendingError = isError;
+                        anyWritten = true;
+                    }
+
+                    if (anyWritten)
+                    {
+                        AppendColoredRun(run.ToString(), pendingError);
+                    }
+                }
+
+                logsTextBox.SelectionStart = 0;
+                logsTextBox.SelectionLength = 0;
+                logsTextBox.SelectionColor = UiTheme.TerminalForeground;
+            }
+            finally
+            {
+                ResumeRedraw(logsTextBox);
+            }
+        }
+
+        private void AppendColoredRun(string text, bool isError)
+        {
+            if (string.IsNullOrEmpty(text))
+            {
+                return;
+            }
+
+            logsTextBox.SelectionStart = logsTextBox.TextLength;
+            logsTextBox.SelectionLength = 0;
+            logsTextBox.SelectionColor = isError ? UiTheme.TerminalErrorForeground : UiTheme.TerminalForeground;
+            logsTextBox.AppendText(text);
         }
 
         private bool CanAppendLogLines(string commandId, CommandLogSnapshot snapshot, string[] lines)
@@ -2623,25 +3158,22 @@ namespace LocalWebTrayShell
             return startIndex >= 0 && startIndex < lines.Length;
         }
 
-        private void AppendLogLines(CommandLogSnapshot snapshot, string[] lines)
+        private void AppendLogLines(CommandLogSnapshot snapshot, string[] lines, bool[] errorFlags)
         {
             int startIndex = renderedLogNextSequence - snapshot.FirstSequence;
-            StringBuilder builder = new StringBuilder();
 
             for (int index = startIndex; index < lines.Length; index++)
             {
-                if (logsTextBox.TextLength > 0 || builder.Length > 0)
+                if (logsTextBox.TextLength > 0)
                 {
-                    builder.Append(Environment.NewLine);
+                    AppendColoredRun(Environment.NewLine, false);
                 }
 
-                builder.Append(lines[index]);
+                bool isError = index < errorFlags.Length && errorFlags[index];
+                AppendColoredRun(lines[index], isError);
             }
 
-            if (builder.Length > 0)
-            {
-                logsTextBox.AppendText(builder.ToString());
-            }
+            logsTextBox.SelectionColor = UiTheme.TerminalForeground;
         }
 
         private void ResetRenderedLogState()
@@ -2649,6 +3181,7 @@ namespace LocalWebTrayShell
             renderedLogCommandId = null;
             renderedLogFirstSequence = 0;
             renderedLogNextSequence = 0;
+            renderedLogFilter = string.Empty;
         }
 
         private void SetWorkspaceMode(WorkspaceMode mode)
@@ -2703,6 +3236,13 @@ namespace LocalWebTrayShell
             }
 
             RefreshWebNavigationVisuals();
+
+            // During construction the restored bounds are not final yet; skip the
+            // write so startup cannot clobber the persisted window placement.
+            if (IsHandleCreated)
+            {
+                PersistConfig();
+            }
         }
 
         private void SetWindowTitle(string title)
@@ -2772,14 +3312,15 @@ namespace LocalWebTrayShell
             sidebarSplitter.Active = false;
             CommitPendingSidebarResize();
             SnapSidebarWidth();
+            PersistConfig();
         }
 
         private void OnSidebarToggleClicked(object sender, EventArgs e)
         {
             if (sidebarHidden)
             {
-                SetSidebarWidth(expandedSidebarWidth <= 0 ? DefaultSidebarWidth : expandedSidebarWidth);
-                SetTransientStatus("\u5de6\u4fa7\u9762\u677f\u5df2\u5c55\u5f00\u3002", 2);
+                SetSidebarWidth(expandedSidebarWidth <= 0 ? S(DefaultSidebarWidth) : expandedSidebarWidth);
+                SetTransientStatus("左侧面板已展开。", 2);
                 return;
             }
 
@@ -2861,12 +3402,12 @@ namespace LocalWebTrayShell
 
         private int GetEffectiveSidebarWidth(int requestedWidth)
         {
-            if (requestedWidth <= SidebarCollapseThreshold)
+            if (requestedWidth <= S(SidebarCollapseThreshold))
             {
                 return 0;
             }
 
-            return Math.Max(SidebarMinExpandedWidth, Math.Min(SidebarMaxWidth, requestedWidth));
+            return Math.Max(S(SidebarMinExpandedWidth), Math.Min(S(SidebarMaxWidth), requestedWidth));
         }
 
         private void OnRootPanelResize(object sender, EventArgs e)
@@ -2882,7 +3423,7 @@ namespace LocalWebTrayShell
         private void LayoutShellPanels(bool resizeWorkspaceContent)
         {
             int sidebarWidth = sidebarHidden ? 0 : expandedSidebarWidth;
-            int splitterWidth = Math.Min(SidebarSplitterWidth, rootPanel.ClientSize.Width);
+            int splitterWidth = Math.Min(S(SidebarSplitterWidth), rootPanel.ClientSize.Width);
             int workspaceX = Math.Min(rootPanel.ClientSize.Width, sidebarWidth + splitterWidth);
             int workspaceWidth = Math.Max(0, rootPanel.ClientSize.Width - workspaceX);
             int height = rootPanel.ClientSize.Height;
@@ -3031,9 +3572,10 @@ namespace LocalWebTrayShell
 
             if (DateTime.UtcNow >= statusSummaryHoldUntilUtc)
             {
-                statusLabel.Text = "\u8fd0\u884c\u4e2d " + running + "/" + commands.Count +
-                    "\uff0c\u7b49\u5f85\u91cd\u8bd5 " + waitingRetry +
-                    "\uff0c\u7ad9\u70b9 " + sites.Count + "\u3002";
+                statusLabel.ForeColor = UiTheme.TextSecondary;
+                statusLabel.Text = "运行中 " + running + "/" + commands.Count +
+                    "，等待重试 " + waitingRetry +
+                    "，站点 " + sites.Count + "。";
             }
         }
 
@@ -3069,11 +3611,17 @@ namespace LocalWebTrayShell
 
         private void SetTransientStatus(string message)
         {
-            SetTransientStatus(message, 3);
+            SetTransientStatus(message, 3, false);
         }
 
         private void SetTransientStatus(string message, int holdSeconds)
         {
+            SetTransientStatus(message, holdSeconds, false);
+        }
+
+        private void SetTransientStatus(string message, int holdSeconds, bool isError)
+        {
+            statusLabel.ForeColor = isError ? UiTheme.DangerForeground : UiTheme.TextSecondary;
             statusLabel.Text = message ?? string.Empty;
             statusSummaryHoldUntilUtc = DateTime.UtcNow.AddSeconds(Math.Max(1, holdSeconds));
         }
@@ -3116,15 +3664,33 @@ namespace LocalWebTrayShell
             commandManager.SyncCommands(commands);
         }
 
-        private void PersistConfig()
+        private AppConfig BuildCurrentConfig()
         {
-            AppConfigStore.Save(new AppConfig
+            Rectangle bounds = GetPersistableBounds();
+
+            return new AppConfig
             {
                 Sites = sites.ToArray(),
                 Commands = commands.ToArray(),
                 GlobalHotkey = pendingHotkey,
-                CommandSectionRatio = sidebarSurface.CommandSectionRatio
-            });
+                CommandSectionRatio = sidebarSurface.CommandSectionRatio,
+                WindowLeft = bounds.Left,
+                WindowTop = bounds.Top,
+                WindowWidth = bounds.Width,
+                WindowHeight = bounds.Height,
+                WindowMaximized = WindowState == FormWindowState.Maximized,
+                SidebarWidth = expandedSidebarWidth,
+                SidebarHidden = sidebarHidden,
+                WorkspaceMode = WorkspaceModeCatalog.ToString(workspaceMode),
+                WorkspaceSplitRatio = workspaceSplitRatio,
+                SelectedSiteId = currentSite == null ? null : currentSite.Id,
+                SelectedCommandId = currentCommand == null ? null : currentCommand.Id
+            };
+        }
+
+        private void PersistConfig()
+        {
+            AppConfigStore.Save(BuildCurrentConfig());
         }
 
         private void ExportConfig()
@@ -3142,13 +3708,7 @@ namespace LocalWebTrayShell
 
                 try
                 {
-                    AppConfigStore.SaveTo(dialog.FileName, new AppConfig
-                    {
-                        Sites = sites.ToArray(),
-                        Commands = commands.ToArray(),
-                        GlobalHotkey = pendingHotkey,
-                        CommandSectionRatio = sidebarSurface.CommandSectionRatio
-                    });
+                    AppConfigStore.SaveTo(dialog.FileName, BuildCurrentConfig());
                     MessageBox.Show("配置已导出。", AppName, MessageBoxButtons.OK, MessageBoxIcon.Information);
                 }
                 catch (Exception ex)
@@ -3206,12 +3766,41 @@ namespace LocalWebTrayShell
                     pendingHotkey = loaded.GlobalHotkey ?? HotkeyConstants.CreateDefault();
                     sidebarSurface.CommandSectionRatio = loaded.CommandSectionRatio;
 
+                    // The previous selection pointed at entries that no longer exist;
+                    // reset it and drop cached WebViews of sites that were removed.
+                    DisposeSiteViewsNotIn(sites);
+                    currentSite = null;
+                    currentCommand = null;
+
                     PersistConfig();
                     TryRegisterHotkey();
                     UpdateHotkeyMenuText();
                     RefreshCommandList();
                     RefreshSiteList();
                     RestartSiteHealthProbe();
+
+                    if (commands.Count > 0)
+                    {
+                        SelectCommand(commands[0], false);
+                    }
+                    else
+                    {
+                        UpdateCommandSelectionVisuals();
+                        RefreshCommandButtons();
+                        RefreshLogsView();
+                    }
+
+                    if (sites.Count > 0)
+                    {
+                        SelectSite(sites[0]);
+                    }
+                    else
+                    {
+                        UpdateSiteSelectionVisuals();
+                        RefreshSiteButtons();
+                        RefreshWebNavigationVisuals();
+                    }
+
                     SetTransientStatus("配置已导入。");
                     AppLogger.Info("config", "配置已导入: " + dialog.FileName + "（站点 " +
                         (loaded.Sites == null ? 0 : loaded.Sites.Length) + " 个，命令 " +
@@ -3273,17 +3862,18 @@ namespace LocalWebTrayShell
 
         private void LayoutTitleBarControls()
         {
-            const int windowButtonWidth = 50;
+            int windowButtonWidth = S(50);
             int right = Math.Max(0, titleBarPanel.ClientSize.Width);
             int labelRight;
 
             closeButton.SetBounds(right - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
             maximizeButton.SetBounds(closeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
             minimizeButton.SetBounds(maximizeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
-            titleSidebarButton.SetBounds(10, 6, 36, 32);
+            titleSidebarButton.SetBounds(S(10), S(6), S(36), S(32));
+            titleMenuButton.SetBounds(minimizeButton.Left - S(36), S(7), S(30), S(30));
 
-            labelRight = Math.Max(58, minimizeButton.Left - 8);
-            titleBarLabel.SetBounds(58, 0, Math.Max(0, labelRight - 58), TitleBarHeight);
+            labelRight = Math.Max(S(58), titleMenuButton.Left - S(8));
+            titleBarLabel.SetBounds(S(58), 0, Math.Max(0, labelRight - S(58)), TitleBarHeight);
         }
 
         private void OnTitleBarMouseDown(object sender, MouseEventArgs e)
@@ -3439,25 +4029,58 @@ namespace LocalWebTrayShell
                 return;
             }
 
+            ToolStripMenuItem item = sender as ToolStripMenuItem;
+            bool desired = item != null && item.Checked;
+
             try
             {
-                WindowsStartupManager.SetEnabled(trayStartupMenuItem.Checked);
+                WindowsStartupManager.SetEnabled(desired);
+                SyncStartupMenuItems(desired);
                 RefreshCachedStartupText();
                 UpdateStatusSummary();
-                SetTransientStatus(trayStartupMenuItem.Checked
-                    ? "\u5df2\u5f00\u542f\u5f00\u673a\u81ea\u542f\u3002"
-                    : "\u5df2\u5173\u95ed\u5f00\u673a\u81ea\u542f\u3002");
+                SetTransientStatus(desired
+                    ? "已开启开机自启。"
+                    : "已关闭开机自启。");
             }
             catch (Exception ex)
             {
-                updatingStartupToggle = true;
-                trayStartupMenuItem.Checked = WindowsStartupManager.IsEnabled();
-                updatingStartupToggle = false;
+                try
+                {
+                    SyncStartupMenuItems(WindowsStartupManager.IsEnabled());
+                }
+                catch
+                {
+                }
+
                 MessageBox.Show(
-                    "\u65e0\u6cd5\u66f4\u65b0\u5f00\u673a\u81ea\u542f\u8bbe\u7f6e\u3002\r\n\r\n" + ex.Message,
+                    "无法更新开机自启设置。\r\n\r\n" + ex.Message,
                     AppName,
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
+            }
+        }
+
+        private void SyncStartupMenuItems(bool enabled)
+        {
+            updatingStartupToggle = true;
+            trayStartupMenuItem.Checked = enabled;
+
+            if (titleStartupMenuItem != null)
+            {
+                titleStartupMenuItem.Checked = enabled;
+            }
+
+            updatingStartupToggle = false;
+        }
+
+        private void OnTitleMenuOpening(object sender, EventArgs e)
+        {
+            try
+            {
+                SyncStartupMenuItems(WindowsStartupManager.IsEnabled());
+            }
+            catch
+            {
             }
         }
 
@@ -3488,6 +4111,8 @@ namespace LocalWebTrayShell
 
         private void OnFormClosing(object sender, FormClosingEventArgs e)
         {
+            PersistConfig();
+
             if (allowExit ||
                 e.CloseReason == CloseReason.ApplicationExitCall ||
                 e.CloseReason == CloseReason.WindowsShutDown ||
@@ -3689,7 +4314,7 @@ namespace LocalWebTrayShell
 
             hotkeyRegistered = false;
             AppLogger.Warn("hotkey", "\u5168\u5c40\u5feb\u6377\u952e\u6ce8\u518c\u5931\u8d25\uff08\u53ef\u80fd\u88ab\u5360\u7528\uff09: " + pendingHotkey.ToDisplayString());
-            SetTransientStatus("\u5168\u5c40\u5feb\u6377\u952e\u6ce8\u518c\u5931\u8d25\uff1a\u53ef\u80fd\u5df2\u88ab\u5176\u4ed6\u7a0b\u5e8f\u5360\u7528\u3002");
+            SetTransientStatus("全局快捷键注册失败：可能已被其他程序占用。", 6, true);
 
             if (notifyIcon != null && notifyIcon.Visible)
             {
@@ -3941,7 +4566,9 @@ namespace LocalWebTrayShell
                         read = stream.Read(resp, 0, 4);
                         if (read >= 2 && resp[0] == 0x05 && resp[1] == 0x00)
                         {
-                            return true;
+                            // CONNECT success only proves the proxy is alive; issue the
+                            // actual HTTP request so "up" means the site responds.
+                            return ProbeHttpOverStream(stream, targetUri);
                         }
                     }
                 }
@@ -3949,6 +4576,31 @@ namespace LocalWebTrayShell
             catch
             {
             }
+            return false;
+        }
+
+        private static bool ProbeHttpOverStream(System.Net.Sockets.NetworkStream stream, Uri targetUri)
+        {
+            try
+            {
+                string request = "HEAD " + (string.IsNullOrEmpty(targetUri.PathAndQuery) ? "/" : targetUri.PathAndQuery) +
+                    " HTTP/1.1\r\nHost: " + targetUri.Host + "\r\nConnection: close\r\n\r\n";
+                byte[] requestBytes = System.Text.Encoding.ASCII.GetBytes(request);
+                stream.Write(requestBytes, 0, requestBytes.Length);
+
+                byte[] buffer = new byte[12];
+                int read = stream.Read(buffer, 0, buffer.Length);
+
+                if (read >= 5)
+                {
+                    string head = System.Text.Encoding.ASCII.GetString(buffer, 0, read);
+                    return head.StartsWith("HTTP/", StringComparison.OrdinalIgnoreCase);
+                }
+            }
+            catch
+            {
+            }
+
             return false;
         }
 
@@ -4044,6 +4696,42 @@ namespace LocalWebTrayShell
             };
         }
 
+        private SiteEntry FindSiteById(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return null;
+            }
+
+            for (int index = 0; index < sites.Count; index++)
+            {
+                if (string.Equals(sites[index].Id, id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return sites[index];
+                }
+            }
+
+            return null;
+        }
+
+        private CommandEntry FindCommandById(string id)
+        {
+            if (string.IsNullOrEmpty(id))
+            {
+                return null;
+            }
+
+            for (int index = 0; index < commands.Count; index++)
+            {
+                if (string.Equals(commands[index].Id, id, StringComparison.OrdinalIgnoreCase))
+                {
+                    return commands[index];
+                }
+            }
+
+            return null;
+        }
+
         private void CopySite(SiteEntry source, SiteEntry target)
         {
             target.Name = source.Name;
@@ -4127,7 +4815,7 @@ namespace LocalWebTrayShell
             return button;
         }
 
-        private bool IsNearBottom(TextBox textBox)
+        private bool IsNearBottom(RichTextBox textBox)
         {
             int firstVisibleLine = GetFirstVisibleLine(textBox);
             int lineHeight = textBox.Font.Height;
@@ -4137,7 +4825,7 @@ namespace LocalWebTrayShell
             return firstVisibleLine + visibleLines >= totalLines - 1;
         }
 
-        private int GetFirstVisibleLine(TextBox textBox)
+        private int GetFirstVisibleLine(RichTextBox textBox)
         {
             if (textBox == null || !textBox.IsHandleCreated)
             {
@@ -4147,7 +4835,7 @@ namespace LocalWebTrayShell
             return SendMessage(textBox.Handle, EM_GETFIRSTVISIBLELINE, IntPtr.Zero, IntPtr.Zero).ToInt32();
         }
 
-        private void ScrollTextBoxToFirstVisibleLine(TextBox textBox, int firstVisibleLine)
+        private void ScrollTextBoxToFirstVisibleLine(RichTextBox textBox, int firstVisibleLine)
         {
             int delta;
 
