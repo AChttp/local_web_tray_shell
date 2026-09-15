@@ -17,3 +17,6 @@ obj/
 # Windows
 Thumbs.db
 Desktop.ini
+
+# Local agent/tooling session state
+.kilo/
