@@ -3546,14 +3546,7 @@ namespace LocalWebTrayShell
         {
             int running = commandManager.GetRunningCount();
             int waitingRetry = commandManager.GetWaitingRetryCount();
-            string startupText = GetCachedStartupText();
 
-            sidebarSurface.SummaryText =
-                "\u547d\u4ee4 " + commands.Count + " \u4e2a\uff0c\u8fd0\u884c\u4e2d " +
-                running + " \u4e2a\uff0c\u7b49\u5f85\u91cd\u8bd5 " +
-                waitingRetry + " \u4e2a\uff0c\u7ad9\u70b9 " +
-                sites.Count + " \u4e2a\uff0c" +
-                startupText + "\u3002";
             sidebarSurface.Invalidate();
 
             // Updating NotifyIcon.Text issues a synchronous Shell_NotifyIcon call into

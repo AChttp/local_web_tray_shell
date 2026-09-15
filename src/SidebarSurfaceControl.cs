@@ -114,27 +114,28 @@ namespace LocalWebTrayShell
         // Design metrics, expressed in pixels at 96 DPI. Everything that reaches the
         // screen goes through S(), so the whole surface scales proportionally on
         // high-DPI monitors instead of letting the text grow out of fixed boxes.
-        private const int OuterLeft = 16;
-        private const int OuterTop = 16;
-        private const int OuterRight = 16;
-        private const int OuterBottom = 14;
-        private const int BrandHeight = 164;
-        private const int MinSectionHeight = 180;
+        // The layout is intentionally compact: density matters more than air here.
+        private const int OuterLeft = 12;
+        private const int OuterTop = 10;
+        private const int OuterRight = 12;
+        private const int OuterBottom = 10;
+        private const int BrandHeight = 46;
+        private const int MinSectionHeight = 120;
         private const int SplitterHeight = 8;
-        private const int SectionPaddingTop = 14;
-        private const int SectionTitleHeight = 30;
-        private const int ReorderColumnWidth = 28;
-        private const int ActionHeight = 40;
-        private const int SiteActionsHeight = 40;
-        private const int CommandItemHeight = 62;
-        private const int SiteItemHeight = 60;
-        private const int ItemSpacing = 8;
-        private const int ListHorizontalPadding = 8;
-        private const int ListTopPadding = 6;
-        private const int ScrollbarWidth = 6;
-        private const int BadgeWidth = 76;
-        private const int SiteBadgeWidth = 62;
-        private const int MiniButtonSize = 23;
+        private const int SectionPaddingTop = 6;
+        private const int SectionTitleHeight = 22;
+        private const int ReorderColumnWidth = 24;
+        private const int ActionHeight = 32;
+        private const int SiteActionsHeight = 32;
+        private const int CommandItemHeight = 50;
+        private const int SiteItemHeight = 44;
+        private const int ItemSpacing = 4;
+        private const int ListHorizontalPadding = 6;
+        private const int ListTopPadding = 4;
+        private const int ScrollbarWidth = 5;
+        private const int BadgeWidth = 70;
+        private const int SiteBadgeWidth = 56;
+        private const int MiniButtonSize = 20;
 
         private const int FocusNone = 0;
         private const int FocusCommands = 1;
@@ -163,12 +164,11 @@ namespace LocalWebTrayShell
         private ToolTip surfaceToolTip;
         private string lastToolTipKey = string.Empty;
 
-        private Font appTitleFont;
         private Font sectionTitleFont;
         private Font buttonFont;
         private Font itemTitleFont;
         private Font itemMetaFont;
-        private Font summaryFont;
+        private Font countFont;
         private Font badgeFont;
 
         public SidebarSurfaceControl()
@@ -204,13 +204,12 @@ namespace LocalWebTrayShell
 
         private void CreateFonts()
         {
-            appTitleFont = UiTheme.CreateFont(13.5f, FontStyle.Bold);
-            sectionTitleFont = UiTheme.CreateFont(11f, FontStyle.Bold);
-            buttonFont = UiTheme.CreateFont(9f, FontStyle.Bold);
+            sectionTitleFont = UiTheme.CreateFont(9.5f, FontStyle.Bold);
+            buttonFont = UiTheme.CreateFont(8.5f, FontStyle.Bold);
             itemTitleFont = UiTheme.CreateFont(9.25f, FontStyle.Bold);
             itemMetaFont = UiTheme.CreateFont(8.4f, FontStyle.Regular);
-            summaryFont = UiTheme.CreateFont(8.75f, FontStyle.Regular);
-            badgeFont = UiTheme.CreateFont(8.25f, FontStyle.Bold);
+            countFont = UiTheme.CreateFont(8.25f, FontStyle.Regular);
+            badgeFont = UiTheme.CreateFont(8f, FontStyle.Bold);
         }
 
         private void OnDpiScaleChanged(object sender, EventArgs e)
@@ -222,12 +221,11 @@ namespace LocalWebTrayShell
 
         private void DisposeFonts()
         {
-            if (appTitleFont != null) { appTitleFont.Dispose(); appTitleFont = null; }
             if (sectionTitleFont != null) { sectionTitleFont.Dispose(); sectionTitleFont = null; }
             if (buttonFont != null) { buttonFont.Dispose(); buttonFont = null; }
             if (itemTitleFont != null) { itemTitleFont.Dispose(); itemTitleFont = null; }
             if (itemMetaFont != null) { itemMetaFont.Dispose(); itemMetaFont = null; }
-            if (summaryFont != null) { summaryFont.Dispose(); summaryFont = null; }
+            if (countFont != null) { countFont.Dispose(); countFont = null; }
             if (badgeFont != null) { badgeFont.Dispose(); badgeFont = null; }
         }
 
@@ -266,8 +264,6 @@ namespace LocalWebTrayShell
         public event EventHandler<SidebarItemContextMenuEventArgs<SiteEntry>> SiteContextMenuRequested;
 
         public Func<string, CommandRuntimeSnapshot> SnapshotProvider { get; set; }
-
-        public string SummaryText { get; set; }
 
         public string SelectedCommandId { get; set; }
 
@@ -1214,20 +1210,24 @@ namespace LocalWebTrayShell
 
         private void DrawBrand(Graphics graphics, Rectangle bounds)
         {
-            int pad = S(18);
-            Rectangle inner = new Rectangle(bounds.X + pad, bounds.Y + S(16), Math.Max(0, bounds.Width - pad * 2), Math.Max(0, bounds.Height - S(30)));
-            int stopWidth = Math.Min(S(124), Math.Max(0, inner.Width / 2));
-            int titleWidth = Math.Max(0, inner.Width - stopWidth - S(8));
-            Rectangle title = new Rectangle(inner.X, inner.Y, titleWidth, S(42));
-            Rectangle stop = new Rectangle(inner.Right - stopWidth, inner.Y + S(2), stopWidth, S(34));
-            Rectangle summary = new Rectangle(inner.X, inner.Y + S(52), inner.Width, S(34));
-            Rectangle actionRow = new Rectangle(inner.X, inner.Y + S(92), inner.Width, S(36));
+            // Single compact row: workspace mode switch on the left, stop-all on the
+            // right. No title, no summary line -- the space belongs to the lists.
+            int stopWidth = S(72);
+            Rectangle row = new Rectangle(bounds.X, bounds.Y + S(7), bounds.Width, S(30));
+            Rectangle seg = new Rectangle(row.X, row.Y, Math.Max(0, row.Width - stopWidth - S(8)), row.Height);
+            Rectangle stop = new Rectangle(row.Right - stopWidth, row.Y, stopWidth, row.Height);
 
-            TextRenderer.DrawText(graphics, "Switch 控制台", appTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
+            DrawSegmentControl(graphics, seg);
             DrawDangerButton(graphics, stop, "全部停止", "stop-all");
-            TextRenderer.DrawText(graphics, SummaryText ?? string.Empty, summaryFont, summary, UiTheme.TextSecondary, TextFlags(ContentAlignment.TopLeft) | TextFormatFlags.WordBreak);
+        }
 
-            DrawSegmentControl(graphics, actionRow);
+        private void DrawSectionTitle(Graphics graphics, Rectangle bounds, string text, int count)
+        {
+            TextRenderer.DrawText(graphics, text, sectionTitleFont, bounds, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
+
+            Size measured = TextRenderer.MeasureText(graphics, text, sectionTitleFont, new Size(int.MaxValue, int.MaxValue), TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
+            Rectangle countRect = new Rectangle(bounds.X + measured.Width + S(5), bounds.Y, Math.Max(0, bounds.Width - measured.Width - S(5)), bounds.Height);
+            TextRenderer.DrawText(graphics, count.ToString(), countFont, countRect, UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
         }
 
         private void DrawCommandSection(Graphics graphics, Rectangle section)
@@ -1236,7 +1236,7 @@ namespace LocalWebTrayShell
             Rectangle actions = new Rectangle(section.X, Math.Max(title.Bottom, section.Bottom - S(ActionHeight)), section.Width, S(ActionHeight));
 
             commandListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
-            TextRenderer.DrawText(graphics, "命令", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
+            DrawSectionTitle(graphics, title, "命令", commands.Count);
             DrawCommandList(graphics, commandListRect);
             DrawButtons(
                 graphics,
@@ -1253,7 +1253,7 @@ namespace LocalWebTrayShell
             Rectangle actions = new Rectangle(section.X, Math.Max(title.Bottom, section.Bottom - S(SiteActionsHeight)), section.Width, S(SiteActionsHeight));
 
             siteListRect = new Rectangle(section.X, title.Bottom, section.Width, Math.Max(0, actions.Top - title.Bottom));
-            TextRenderer.DrawText(graphics, "站点", sectionTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft) | TextFormatFlags.NoPadding);
+            DrawSectionTitle(graphics, title, "站点", sites.Count);
             DrawSiteList(graphics, siteListRect);
             DrawButtons(
                 graphics,
@@ -1408,7 +1408,7 @@ namespace LocalWebTrayShell
             Color fill = selected ? UiTheme.ItemSelectedBack : itemHovered ? UiTheme.ItemHoverBack : UiTheme.Surface;
             Color border = selected ? UiTheme.Primary : itemHovered ? UiTheme.ItemHoverBorder : UiTheme.Border;
             int contentRight = bounds.Right - S(ReorderColumnWidth) - S(4);
-            Rectangle badge = new Rectangle(contentRight - S(BadgeWidth), bounds.Y + S(9), S(BadgeWidth), S(23));
+            Rectangle badge = new Rectangle(contentRight - S(BadgeWidth), bounds.Y + S(7), S(BadgeWidth), S(18));
 
             DrawCard(graphics, bounds, fill, border);
 
@@ -1417,17 +1417,17 @@ namespace LocalWebTrayShell
                 DrawFocusRing(graphics, bounds);
             }
 
-            DrawRoundedFill(graphics, new Rectangle(bounds.X + S(10), bounds.Y + S(10), S(5), Math.Max(S(10), bounds.Height - S(20))), accent, accent, 2);
+            DrawRoundedFill(graphics, new Rectangle(bounds.X + S(8), bounds.Y + S(8), S(4), Math.Max(S(8), bounds.Height - S(16))), accent, accent, 2);
 
             // Inline actions are always laid out (no text reflow on hover); they render
             // subdued until the row is hovered or selected.
             bool emphasized = itemHovered || selected;
             bool isRunning = status == CommandStatus.Running;
-            int btnWidth = S(24);
+            int btnWidth = S(20);
             int btnHeight = S(MiniButtonSize);
-            Rectangle runBtn = new Rectangle(badge.Left - btnWidth - S(4), bounds.Y + S(9), btnWidth, btnHeight);
-            Rectangle restartBtn = new Rectangle(runBtn.Left - btnWidth - S(3), bounds.Y + S(9), btnWidth, btnHeight);
-            int titleRight = restartBtn.Left - S(6);
+            Rectangle runBtn = new Rectangle(badge.Left - btnWidth - S(3), bounds.Y + S(6), btnWidth, btnHeight);
+            Rectangle restartBtn = new Rectangle(runBtn.Left - btnWidth - S(2), bounds.Y + S(6), btnWidth, btnHeight);
+            int titleRight = restartBtn.Left - S(5);
 
             string id = command == null ? string.Empty : command.Id ?? string.Empty;
             hitRects["cmd-runstop:" + id] = runBtn;
@@ -1439,8 +1439,8 @@ namespace LocalWebTrayShell
             DrawMiniIconButton(graphics, runBtn, isRunning ? MiniIconType.Stop : MiniIconType.Play, runHover, emphasized);
             DrawMiniIconButton(graphics, restartBtn, MiniIconType.Restart, restartHover, emphasized);
 
-            Rectangle title = new Rectangle(bounds.X + S(26), bounds.Y + S(9), Math.Max(1, titleRight - bounds.X - S(26)), S(23));
-            Rectangle meta = new Rectangle(bounds.X + S(26), bounds.Y + S(38), Math.Max(1, contentRight - bounds.X - S(30)), S(18));
+            Rectangle title = new Rectangle(bounds.X + S(20), bounds.Y + S(4), Math.Max(1, titleRight - bounds.X - S(20)), S(19));
+            Rectangle meta = new Rectangle(bounds.X + S(20), bounds.Y + S(25), Math.Max(1, contentRight - bounds.X - S(24)), S(15));
 
             TextRenderer.DrawText(graphics, GetCommandTitle(command), itemTitleFont, title, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
             DrawBadge(graphics, badge, snapshot == null ? "已停止" : snapshot.GetDisplayStatus(), GetStatusBadgeBackground(status), accent);
@@ -1564,26 +1564,26 @@ namespace LocalWebTrayShell
                 DrawFocusRing(graphics, bounds);
             }
 
-            DrawRoundedFill(graphics, new Rectangle(bounds.X + S(10), bounds.Y + S(10), S(5), Math.Max(S(10), bounds.Height - S(20))), accent, accent, 2);
+            DrawRoundedFill(graphics, new Rectangle(bounds.X + S(8), bounds.Y + S(7), S(4), Math.Max(S(8), bounds.Height - S(14))), accent, accent, 2);
 
             string id = site == null ? string.Empty : site.Id ?? string.Empty;
             int siteContentRight = bounds.Right - S(ReorderColumnWidth) - S(4);
 
             // Health is conveyed with a text badge as well as color, so the status
             // stays readable for color-blind users.
-            Rectangle healthBadge = new Rectangle(siteContentRight - S(SiteBadgeWidth), bounds.Y + S(9), S(SiteBadgeWidth), S(20));
-            Rectangle titleRect = new Rectangle(bounds.X + S(26), bounds.Y + S(8), Math.Max(1, healthBadge.Left - bounds.X - S(30)), S(22));
-            Rectangle urlRect = new Rectangle(bounds.X + S(26), bounds.Y + S(34), Math.Max(1, siteContentRight - bounds.X - S(30)), S(18));
+            Rectangle healthBadge = new Rectangle(siteContentRight - S(SiteBadgeWidth), bounds.Y + S(5), S(SiteBadgeWidth), S(17));
+            Rectangle titleRect = new Rectangle(bounds.X + S(20), bounds.Y + S(3), Math.Max(1, healthBadge.Left - bounds.X - S(24)), S(18));
+            Rectangle urlRect = new Rectangle(bounds.X + S(20), bounds.Y + S(22), Math.Max(1, siteContentRight - bounds.X - S(24)), S(14));
 
             bool hasProxy = site != null && site.ProxyEnabled && !string.IsNullOrWhiteSpace(site.ProxyServer);
             if (hasProxy)
             {
-                int tagWidth = S(34);
-                int tagHeight = S(16);
-                Rectangle tagRect = new Rectangle(siteContentRight - tagWidth - S(2), bounds.Y + S(36), tagWidth, tagHeight);
+                int tagWidth = S(30);
+                int tagHeight = S(13);
+                Rectangle tagRect = new Rectangle(siteContentRight - tagWidth - S(2), bounds.Y + S(23), tagWidth, tagHeight);
                 DrawRoundedFill(graphics, tagRect, UiTheme.ProxyTagBack, UiTheme.ProxyTagBorder, S(3));
                 TextRenderer.DrawText(graphics, "代理", itemMetaFont, tagRect, UiTheme.ProxyTagText, TextFlags(ContentAlignment.MiddleCenter));
-                urlRect = new Rectangle(bounds.X + S(26), bounds.Y + S(34), Math.Max(1, tagRect.Left - bounds.X - S(28)), S(18));
+                urlRect = new Rectangle(bounds.X + S(20), bounds.Y + S(22), Math.Max(1, tagRect.Left - bounds.X - S(22)), S(14));
             }
 
             TextRenderer.DrawText(graphics, site == null ? string.Empty : site.Name ?? string.Empty, itemTitleFont, titleRect, UiTheme.TextPrimary, TextFlags(ContentAlignment.MiddleLeft));
@@ -1665,8 +1665,8 @@ namespace LocalWebTrayShell
                 return;
             }
 
-            int gap = bounds.Width < S(260) ? S(8) : S(12);
-            int buttonHeight = Math.Min(S(34), bounds.Height);
+            int gap = bounds.Width < S(260) ? S(6) : S(8);
+            int buttonHeight = Math.Min(S(26), bounds.Height);
             int y = bounds.Y + Math.Max(0, (bounds.Height - buttonHeight) / 2);
             int available = Math.Max(0, bounds.Width - (gap * (count - 1)));
             int buttonWidth = available / count;
@@ -1751,31 +1751,31 @@ namespace LocalWebTrayShell
         private void DrawEmpty(Graphics graphics, Rectangle listBounds, string title, string hint, string buttonText, string key)
         {
             Rectangle bounds = new Rectangle(
-                listBounds.X + S(8),
-                listBounds.Y + S(8),
-                Math.Max(S(160), listBounds.Width - S(24)),
-                S(88));
+                listBounds.X + S(6),
+                listBounds.Y + S(6),
+                Math.Max(S(140), listBounds.Width - S(18)),
+                S(64));
 
             // Dashed card reads as a placeholder; only the pill inside is clickable.
             using (Pen pen = new Pen(UiTheme.Border, 1f))
             {
                 pen.DashStyle = DashStyle.Dash;
-                using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, S(8)))
+                using (GraphicsPath path = UiTheme.CreateRoundedRectanglePath(bounds, S(7)))
                 {
                     graphics.DrawPath(pen, path);
                 }
             }
 
-            Rectangle titleRect = new Rectangle(bounds.X + S(14), bounds.Y + S(10), Math.Max(1, bounds.Width - S(28)), S(20));
-            Rectangle hintRect = new Rectangle(bounds.X + S(14), bounds.Y + S(30), Math.Max(1, bounds.Width - S(28)), S(16));
+            Rectangle titleRect = new Rectangle(bounds.X + S(12), bounds.Y + S(6), Math.Max(1, bounds.Width - S(24)), S(15));
+            Rectangle hintRect = new Rectangle(bounds.X + S(12), bounds.Y + S(21), Math.Max(1, bounds.Width - S(24)), S(13));
             TextRenderer.DrawText(graphics, title, itemTitleFont, titleRect, UiTheme.TextSecondary, TextFlags(ContentAlignment.MiddleLeft));
             TextRenderer.DrawText(graphics, hint, itemMetaFont, hintRect, UiTheme.TextMuted, TextFlags(ContentAlignment.MiddleLeft));
 
-            int pillWidth = Math.Min(S(120), Math.Max(S(80), bounds.Width - S(28)));
-            Rectangle pill = new Rectangle(bounds.X + S(14), bounds.Bottom - S(36), pillWidth, S(26));
+            int pillWidth = Math.Min(S(104), Math.Max(S(72), bounds.Width - S(24)));
+            Rectangle pill = new Rectangle(bounds.X + S(12), bounds.Bottom - S(28), pillWidth, S(21));
             bool hover = string.Equals(hoverKey, key, StringComparison.OrdinalIgnoreCase);
 
-            DrawRoundedFill(graphics, pill, hover ? UiTheme.PrimaryHover : UiTheme.Primary, UiTheme.Primary, S(13));
+            DrawRoundedFill(graphics, pill, hover ? UiTheme.PrimaryHover : UiTheme.Primary, UiTheme.Primary, S(10));
             TextRenderer.DrawText(graphics, buttonText, buttonFont, pill, Color.White, TextFlags(ContentAlignment.MiddleCenter));
             hitRects[key] = pill;
         }
