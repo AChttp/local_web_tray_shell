@@ -2,6 +2,48 @@
 
 This file records the actual publishing workflow used for this repository, including repository bootstrap, versioning, tagging, and GitHub Release publication.
 
+## 2026-09-15 - v1.0.7 UI Overhaul Release (DPI Scaling + Window Chrome + Interaction Polish)
+
+### Versioning and Release Preparation
+
+1. Updated release version file:
+   - `VERSION`
+   - Current value: `1.0.7`
+2. Updated in-code version constant:
+   - `src\Program.cs` `AppVersion` (drives the session-log header)
+3. Updated release documentation:
+   - `README.md`（版本号）
+   - `CHANGELOG.md`
+   - `docs/releases/v1.0.7.md`
+4. Rebuilt the application with:
+   - `powershell -ExecutionPolicy Bypass -File .\build.ps1`
+5. Verified bundled dependencies and startup checks with:
+   - `dist\Switch.exe --self-test`
+6. Smoke-tested the build: launched, verified session log header reports `Version=1.0.7`, WebView2 ready, commands and health probes working, layout persistence written to config, maximize fills the working area without covering the taskbar.
+7. Feature commits (pushed before release prep):
+   - `d12a5f1` Overhaul UI: DPI-aware scaling, window chrome fixes, and interaction polish
+   - `e8b1ec2` Compact sidebar density and drop low-value brand area
+8. Release preparation commit:
+   - Commit: `620c115`
+   - Message: `Prepare v1.0.7 release`
+
+### Tagging
+
+1. Created annotated Git tag:
+   - `v1.0.7`
+2. Pushed `main` and the tag to `origin`.
+
+### GitHub Release Publication
+
+1. Authenticated `gh` via browser device flow (required `HTTPS_PROXY=http://127.0.0.1:7890`, matching the git proxy config).
+2. Created GitHub Release for tag:
+   - `v1.0.7`
+3. Uploaded release assets:
+   - `Switch.exe`
+   - `Switch-v1.0.7-win-x64.zip`
+4. Release URL:
+   - https://github.com/AChttp/local_web_tray_shell/releases/tag/v1.0.7
+
 ## 2026-09-02 - v1.0.6 Stability Release (Freeze Fixes + Session Logging)
 
 ### Versioning and Release Preparation
