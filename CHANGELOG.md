@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.0.8 - 2026-09-15
+
+Polish release that trims the custom title bar to standard height.
+
+### Changed
+
+- The custom title bar is now 32px tall (was 44px at 96 DPI), matching standard Windows title bars. The sidebar toggle and overflow menu buttons are smaller and vertically centered; minimize/maximize/close keep their standard-width hit areas.
+
+### Release Assets
+
+- `Switch.exe`
+- `Switch-v1.0.8-win-x64.zip`
+
 ## v1.0.7 - 2026-09-15
 
 UI overhaul release: full high-DPI support, window chrome fixes, a denser sidebar, a smarter logs view, and a batch of interaction fixes.

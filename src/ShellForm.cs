@@ -49,7 +49,7 @@ namespace LocalWebTrayShell
 
         private static int TitleBarHeight
         {
-            get { return S(44); }
+            get { return S(32); }
         }
 
         private static int ResizeGripSize
@@ -275,7 +275,7 @@ namespace LocalWebTrayShell
             titleBarPanel.Resize += OnTitleBarResize;
 
             titleSidebarButton = new TitleBarIconButton(TitleBarButtonKind.Sidebar);
-            titleSidebarButton.Location = new Point(S(10), S(6));
+            titleSidebarButton.Location = new Point(S(8), S(4));
             titleSidebarButton.SidebarCollapsed = sidebarHidden;
             titleSidebarButton.Click += OnSidebarToggleClicked;
 
@@ -3862,8 +3862,8 @@ namespace LocalWebTrayShell
             closeButton.SetBounds(right - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
             maximizeButton.SetBounds(closeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
             minimizeButton.SetBounds(maximizeButton.Left - windowButtonWidth, 0, windowButtonWidth, TitleBarHeight);
-            titleSidebarButton.SetBounds(S(10), S(6), S(36), S(32));
-            titleMenuButton.SetBounds(minimizeButton.Left - S(36), S(7), S(30), S(30));
+            titleSidebarButton.SetBounds(S(8), Math.Max(0, (TitleBarHeight - S(24)) / 2), S(24), S(24));
+            titleMenuButton.SetBounds(minimizeButton.Left - S(30), Math.Max(0, (TitleBarHeight - S(22)) / 2), S(22), S(22));
 
             labelRight = Math.Max(S(58), titleMenuButton.Left - S(8));
             titleBarLabel.SetBounds(S(58), 0, Math.Max(0, labelRight - S(58)), TitleBarHeight);

@@ -7,7 +7,7 @@ namespace LocalWebTrayShell
 {
     internal static class Program
     {
-        public const string AppVersion = "1.0.7";
+        public const string AppVersion = "1.0.8";
 
         [DllImport("shcore.dll")]
         private static extern int SetProcessDpiAwareness(int value);
